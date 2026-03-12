@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, Image, Alert, Switch, ActivityIndicator, SafeAreaView
+  ScrollView, Image, Alert, Switch, ActivityIndicator,
+  KeyboardAvoidingView, Platform
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { getRecordById, updateRecord, deleteRecord } from '@/db/recordRepository';
 import { deletePhoto } from '@/services/photoService';
@@ -63,7 +65,7 @@ export default function RecordDetailScreen() {
       return;
     }
     if (hasTerminal && !isValidTerminalDesignation(terminalDes)) {
-      Alert.alert('Invalid Format', 'Terminal designation must be in x.xx format (e.g. 2.13).');
+      Alert.alert('Invalid Format', 'Terminal designation must be in x.x or x.xx format (e.g. 1.1, 2.13, 10.10).');
       return;
     }
     setSaving(true);
@@ -144,6 +146,10 @@ export default function RecordDetailScreen() {
   return (
     <SafeAreaView style={styles.safe}>
       <Stack.Screen options={{ title: record.id }} />
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         {/* Photo */}
         <Image source={{ uri: record.photoPath }} style={styles.photo} resizeMode="cover" />
@@ -282,6 +288,7 @@ export default function RecordDetailScreen() {
           )}
         </View>
       </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Delete confirmation */}
       <ConfirmDialog
@@ -343,6 +350,7 @@ const fieldStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
+  flex: { flex: 1 },
   scroll: { paddingBottom: spacing.xl },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   photo: {

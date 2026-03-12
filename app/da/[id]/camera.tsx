@@ -1,7 +1,8 @@
 import React, { useRef, useState, useEffect } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Alert, SafeAreaView
+  View, Text, TouchableOpacity, StyleSheet, Alert
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { colors, spacing } from '@/components/theme';
@@ -53,29 +54,28 @@ export default function CameraScreen() {
 
   return (
     <View style={styles.container}>
-      <CameraView ref={cameraRef} style={styles.camera} facing="back">
-        <SafeAreaView style={styles.overlay}>
-          {/* Top bar */}
-          <View style={styles.topBar}>
-            <TouchableOpacity onPress={() => router.back()} style={styles.cancelBtn}>
-              <Text style={styles.cancelText}>Cancel</Text>
-            </TouchableOpacity>
-            <Text style={styles.daLabel}>{id}</Text>
-            <View style={{ width: 70 }} />
-          </View>
+      <CameraView ref={cameraRef} style={styles.camera} facing="back" zoom={0} />
+      <SafeAreaView style={styles.overlay} pointerEvents="box-none">
+        {/* Top bar */}
+        <View style={styles.topBar}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.cancelBtn}>
+            <Text style={styles.cancelText}>Cancel</Text>
+          </TouchableOpacity>
+          <Text style={styles.daLabel}>{id}</Text>
+          <View style={{ width: 70 }} />
+        </View>
 
-          {/* Capture button */}
-          <View style={styles.bottomBar}>
-            <TouchableOpacity
-              style={[styles.shutterOuter, capturing && styles.shutterDisabled]}
-              onPress={handleCapture}
-              disabled={capturing}
-            >
-              <View style={styles.shutterInner} />
-            </TouchableOpacity>
-          </View>
-        </SafeAreaView>
-      </CameraView>
+        {/* Capture button */}
+        <View style={styles.bottomBar}>
+          <TouchableOpacity
+            style={[styles.shutterOuter, capturing && styles.shutterDisabled]}
+            onPress={handleCapture}
+            disabled={capturing}
+          >
+            <View style={styles.shutterInner} />
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
     </View>
   );
 }
@@ -89,7 +89,7 @@ const styles = StyleSheet.create({
   },
   camera: { flex: 1, width: '100%' },
   overlay: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     justifyContent: 'space-between',
   },
   topBar: {

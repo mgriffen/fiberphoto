@@ -21,8 +21,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     (async () => {
       await getDatabase(); // ensure schema is initialised
-      const stored = await getSetting('userName');
-      if (stored) setUserNameState(stored);
+      // Don't restore userName — user must sign in each session
       setIsReady(true);
     })();
   }, []);

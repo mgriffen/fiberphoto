@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, Image, Alert, Switch, ActivityIndicator, SafeAreaView
+  ScrollView, Image, Alert, Switch, ActivityIndicator,
+  KeyboardAvoidingView, Platform
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { createRecord } from '@/db/recordRepository';
 import { savePhoto } from '@/services/photoService';
@@ -32,7 +34,7 @@ export default function RecordNewScreen() {
       return;
     }
     if (hasTerminal && !isValidTerminalDesignation(terminalDes)) {
-      Alert.alert('Invalid Format', 'Terminal designation must be in x.xx format (e.g. 2.13).');
+      Alert.alert('Invalid Format', 'Terminal designation must be in x.x or x.xx format (e.g. 1.1, 2.13, 10.10).');
       return;
     }
 
@@ -55,8 +57,8 @@ export default function RecordNewScreen() {
         userName || 'Unknown'
       );
 
-      // Pop back to DA detail
-      router.dismiss(2);
+      // Navigate back to DA detail (replaces stack so we don't land on home)
+      router.replace(`/da/${daId}`);
     } catch (e: any) {
       Alert.alert('Save Failed', e.message ?? 'Unknown error');
       setSaving(false);
@@ -69,6 +71,10 @@ export default function RecordNewScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         {/* Photo preview */}
         <Image source={{ uri: tempUri }} style={styles.photo} resizeMode="cover" />
@@ -164,12 +170,14 @@ export default function RecordNewScreen() {
           </TouchableOpacity>
         </View>
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
+  flex: { flex: 1 },
   scroll: { paddingBottom: spacing.xl },
   photo: {
     width: '100%',

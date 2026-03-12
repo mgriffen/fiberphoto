@@ -1,4 +1,4 @@
-import { getAllSequenceNums } from '../db/recordRepository';
+import { getDatabase } from '../db/database';
 import { StructureTypeId } from '../types';
 
 /**
@@ -7,7 +7,11 @@ import { StructureTypeId } from '../types';
  * If no gaps, returns max + 1.
  */
 export async function getNextSequenceNum(): Promise<number> {
-  const existing = await getAllSequenceNums(); // sorted ascending
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<{ sequence_num: number }>(
+    'SELECT sequence_num FROM records ORDER BY sequence_num ASC'
+  );
+  const existing = rows.map(r => r.sequence_num);
 
   if (existing.length === 0) return 1;
 

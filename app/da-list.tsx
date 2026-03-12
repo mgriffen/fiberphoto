@@ -1,8 +1,9 @@
 import React, { useCallback, useState } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
-  TextInput, SafeAreaView, ActivityIndicator
+  TextInput, ActivityIndicator
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { getAllDAs } from '@/db/daRepository';
 import { getRecordsByDA } from '@/db/recordRepository';

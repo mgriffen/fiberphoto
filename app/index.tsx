@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  KeyboardAvoidingView, Platform, Alert, SafeAreaView
+  KeyboardAvoidingView, Platform, Alert
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAppContext } from '@/context/AppContext';
 import { createDA, daExists } from '@/db/daRepository';
@@ -48,7 +49,7 @@ export default function WelcomeScreen() {
   return (
     <SafeAreaView style={styles.safe}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.flex}
       >
         <View style={styles.header}>
@@ -99,9 +100,9 @@ export default function WelcomeScreen() {
               onSubmitEditing={handleCreateDA}
             />
             <TouchableOpacity
-              style={[styles.primaryBtn, !daInput.trim() && styles.disabled]}
+              style={[styles.primaryBtn, (!daInput.trim() || !userName) && styles.disabled]}
               onPress={handleCreateDA}
-              disabled={!daInput.trim()}
+              disabled={!daInput.trim() || !userName}
             >
               <Text style={styles.primaryBtnText}>Create DA</Text>
             </TouchableOpacity>
@@ -111,8 +112,14 @@ export default function WelcomeScreen() {
 
           {/* Load existing */}
           <TouchableOpacity
-            style={styles.secondaryBtn}
-            onPress={() => router.push('/da-list')}
+            style={[styles.secondaryBtn, !userName && styles.disabled]}
+            onPress={() => {
+              if (!userName) {
+                Alert.alert('Set Your Name', 'Please enter your name before accessing DAs.');
+                return;
+              }
+              router.push('/da-list');
+            }}
           >
             <Text style={styles.secondaryBtnText}>Load Existing DA</Text>
           </TouchableOpacity>

@@ -1,8 +1,9 @@
 import React, { useCallback, useState } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
-  Alert, ActivityIndicator, SafeAreaView
+  Alert, ActivityIndicator
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack } from 'expo-router';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { getDAById } from '@/db/daRepository';
