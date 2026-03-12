@@ -16,6 +16,13 @@ export const colors = {
   inputBg:       '#f9fafb',
 };
 
+/** Color scheme per structure type abbreviation */
+export const structureColors: Record<string, { bg: string; text: string; border: string }> = {
+  FP: { bg: '#ecfdf5', text: '#059669', border: '#6ee7b7' },  // green — Flower Pot
+  HH: { bg: '#eff6ff', text: '#2563eb', border: '#93c5fd' },  // blue  — Hand Hole
+  BP: { bg: '#fff7ed', text: '#ea580c', border: '#fdba74' },  // orange — Bore Pit
+};
+
 export const fonts = {
   mono: 'Courier New',
 };

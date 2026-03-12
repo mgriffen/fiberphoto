@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { STRUCTURE_OPTIONS } from '../types';
-import { colors, spacing, radius } from './theme';
+import { colors, structureColors, spacing, radius } from './theme';
 
 interface Props {
   selected: string;
@@ -13,17 +13,27 @@ export function StructureTypePicker({ selected, onSelect }: Props) {
     <View style={styles.grid}>
       {STRUCTURE_OPTIONS.map(opt => {
         const active = selected === opt.value;
+        const typeColor = structureColors[opt.abbreviation] ?? structureColors.HH;
         return (
           <TouchableOpacity
             key={opt.value}
-            style={[styles.btn, active && styles.btnActive]}
+            style={[
+              styles.btn,
+              active && { backgroundColor: typeColor.bg, borderColor: typeColor.border },
+            ]}
             onPress={() => onSelect(opt.value, opt.abbreviation)}
-            activeOpacity={0.75}
+            activeOpacity={0.7}
           >
-            <Text style={[styles.abbrev, active && styles.abbrevActive]}>
+            <Text style={[
+              styles.abbrev,
+              active && { color: typeColor.text },
+            ]}>
               {opt.abbreviation}
             </Text>
-            <Text style={[styles.label, active && styles.labelActive]} numberOfLines={2}>
+            <Text style={[
+              styles.label,
+              active && { color: typeColor.text, fontWeight: '600' },
+            ]} numberOfLines={2}>
               {opt.label}
             </Text>
           </TouchableOpacity>
@@ -48,26 +58,16 @@ const styles = StyleSheet.create({
     padding: spacing.sm + 2,
     alignItems: 'center',
   },
-  btnActive: {
-    backgroundColor: colors.accentLight,
-    borderColor: colors.accent,
-  },
   abbrev: {
-    fontSize: 22,
-    fontWeight: '800',
+    fontSize: 24,
+    fontWeight: '900',
     color: colors.textSecondary,
     marginBottom: 2,
-  },
-  abbrevActive: {
-    color: colors.accent,
+    letterSpacing: 1,
   },
   label: {
     fontSize: 12,
     color: colors.textSecondary,
     textAlign: 'center',
-  },
-  labelActive: {
-    color: colors.accent,
-    fontWeight: '600',
   },
 });

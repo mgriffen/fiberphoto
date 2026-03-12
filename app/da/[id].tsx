@@ -110,9 +110,36 @@ export default function DADetailScreen() {
             {/* DA header */}
             <View style={styles.daHeader}>
               <Text style={styles.daId}>{da.id}</Text>
-              <Text style={styles.count}>
-                {records.length} structure{records.length !== 1 ? 's' : ''}
-              </Text>
+              <View style={styles.statsRow}>
+                <View style={styles.statBubble}>
+                  <Text style={styles.statNum}>{records.length}</Text>
+                  <Text style={styles.statLabel}>
+                    structure{records.length !== 1 ? 's' : ''}
+                  </Text>
+                </View>
+                {records.length > 0 && (
+                  <>
+                    <View style={styles.statBubble}>
+                      <Text style={styles.statNum}>
+                        {records.filter(r => r.typeAbbrev === 'HH').length}
+                      </Text>
+                      <Text style={styles.statLabel}>HH</Text>
+                    </View>
+                    <View style={styles.statBubble}>
+                      <Text style={styles.statNum}>
+                        {records.filter(r => r.typeAbbrev === 'FP').length}
+                      </Text>
+                      <Text style={styles.statLabel}>FP</Text>
+                    </View>
+                    <View style={styles.statBubble}>
+                      <Text style={styles.statNum}>
+                        {records.filter(r => r.typeAbbrev === 'BP').length}
+                      </Text>
+                      <Text style={styles.statLabel}>BP</Text>
+                    </View>
+                  </>
+                )}
+              </View>
             </View>
 
             {/* Gap warning scoped to this DA */}
@@ -143,8 +170,9 @@ export default function DADetailScreen() {
         }
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={styles.emptyText}>No records yet.</Text>
-            <Text style={styles.emptyHint}>Tap "New Record" to start.</Text>
+            <Text style={styles.emptyIcon}>📷</Text>
+            <Text style={styles.emptyText}>No structures recorded</Text>
+            <Text style={styles.emptyHint}>Tap "+ New Record" to photograph your first structure</Text>
           </View>
         }
         contentContainerStyle={{ paddingBottom: spacing.xl }}
@@ -162,15 +190,36 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
   },
   daId: {
-    fontSize: 32,
-    fontWeight: '800',
+    fontSize: 34,
+    fontWeight: '900',
     color: '#fff',
     fontFamily: 'Courier New',
+    letterSpacing: 2,
   },
-  count: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.65)',
-    marginTop: 2,
+  statsRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  statBubble: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: radius.sm + 2,
+    paddingHorizontal: spacing.sm + 4,
+    paddingVertical: spacing.xs + 2,
+    alignItems: 'center',
+    minWidth: 48,
+  },
+  statNum: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#fff',
+  },
+  statLabel: {
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.6)',
+    fontWeight: '600',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
   actions: {
     flexDirection: 'row',
@@ -216,16 +265,23 @@ const styles = StyleSheet.create({
   empty: {
     alignItems: 'center',
     paddingVertical: spacing.xl * 2,
+    paddingHorizontal: spacing.lg,
+  },
+  emptyIcon: {
+    fontSize: 48,
+    marginBottom: spacing.sm,
   },
   emptyText: {
-    fontSize: 17,
-    fontWeight: '600',
+    fontSize: 18,
+    fontWeight: '700',
     color: colors.textSecondary,
   },
   emptyHint: {
     fontSize: 14,
     color: colors.textSecondary,
-    marginTop: 4,
+    marginTop: spacing.xs,
+    textAlign: 'center',
+    lineHeight: 20,
   },
   disabled: { opacity: 0.5 },
   errorText: { fontSize: 16, color: colors.danger },
