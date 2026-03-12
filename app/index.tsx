@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAppContext } from '@/context/AppContext';
 import { createDA, daExists } from '@/db/daRepository';
+import { getSetting, setSetting } from '@/db/recordRepository';
 import { normaliseDAId, isValidDAId } from '@/utils/validators';
 import { colors, spacing, radius } from '@/components/theme';
 
@@ -16,6 +17,17 @@ export default function WelcomeScreen() {
   const [daInput, setDaInput] = useState('');
   const [nameInput, setNameInput] = useState(userName);
   const [savingName, setSavingName] = useState(false);
+  const [seqInput, setSeqInput] = useState('');
+  const [currentMinSeq, setCurrentMinSeq] = useState<number | null>(null);
+
+  // Load current minSequenceNum on mount
+  React.useEffect(() => {
+    if (isReady) {
+      getSetting('minSequenceNum').then(val => {
+        if (val) setCurrentMinSeq(parseInt(val, 10));
+      });
+    }
+  }, [isReady]);
 
   if (!isReady) return null;
 
@@ -36,6 +48,18 @@ export default function WelcomeScreen() {
     }
     await createDA(id);
     router.push(`/da/${id}`);
+  };
+
+  const handleSetStartingSeq = async () => {
+    const num = parseInt(seqInput.trim(), 10);
+    if (isNaN(num) || num < 1) {
+      Alert.alert('Invalid Number', 'Enter a valid starting sequence number.');
+      return;
+    }
+    await setSetting('minSequenceNum', String(num));
+    setCurrentMinSeq(num);
+    setSeqInput('');
+    Alert.alert('Saved', `New records will start at #${num}.`);
   };
 
   const handleSaveName = async () => {
@@ -81,6 +105,35 @@ export default function WelcomeScreen() {
             </View>
             {userName ? (
               <Text style={styles.savedName}>Signed in as: {userName}</Text>
+            ) : null}
+          </View>
+
+          <View style={styles.divider} />
+
+          {/* Starting sequence number */}
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>Starting Sequence Number</Text>
+            <View style={styles.row}>
+              <TextInput
+                style={[styles.input, styles.flex]}
+                placeholder={currentMinSeq ? String(currentMinSeq) : 'e.g. 573'}
+                placeholderTextColor={colors.textSecondary}
+                value={seqInput}
+                onChangeText={setSeqInput}
+                keyboardType="number-pad"
+                returnKeyType="done"
+                onSubmitEditing={handleSetStartingSeq}
+              />
+              <TouchableOpacity
+                style={[styles.smallBtn, !seqInput.trim() && styles.disabled]}
+                onPress={handleSetStartingSeq}
+                disabled={!seqInput.trim()}
+              >
+                <Text style={styles.smallBtnText}>Set</Text>
+              </TouchableOpacity>
+            </View>
+            {currentMinSeq ? (
+              <Text style={styles.savedName}>Next new record starts at #{currentMinSeq}</Text>
             ) : null}
           </View>
 
