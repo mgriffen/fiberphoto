@@ -146,10 +146,6 @@ export default function RecordDetailScreen() {
   return (
     <SafeAreaView style={styles.safe}>
       <Stack.Screen options={{ title: record.id }} />
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         {/* Photo */}
         <Image source={{ uri: record.photoPath }} style={styles.photo} resizeMode="cover" />
@@ -288,7 +284,6 @@ export default function RecordDetailScreen() {
           )}
         </View>
       </ScrollView>
-      </KeyboardAvoidingView>
 
       {/* Delete confirmation */}
       <ConfirmDialog

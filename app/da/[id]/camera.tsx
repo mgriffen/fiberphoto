@@ -9,22 +9,18 @@ import {
   useCameraPermission,
   PhotoFile,
 } from 'react-native-vision-camera';
-import * as ScreenOrientation from 'expo-screen-orientation';
+import { Accelerometer } from 'expo-sensors';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { colors, spacing } from '@/components/theme';
 
-/** Map orientation enum to rotation degrees for UI elements */
-function getRotation(orientation: ScreenOrientation.Orientation): number {
-  switch (orientation) {
-    case ScreenOrientation.Orientation.LANDSCAPE_LEFT:
-      return 90;
-    case ScreenOrientation.Orientation.LANDSCAPE_RIGHT:
-      return -90;
-    case ScreenOrientation.Orientation.PORTRAIT_DOWN:
-      return 180;
-    default:
-      return 0;
+/** Determine icon rotation from accelerometer data */
+function getRotationFromAccel(x: number, y: number): number {
+  // x ~ -1 = landscape left (home button right), x ~ 1 = landscape right
+  // y ~ -1 = upside down, y ~ 1 = portrait
+  if (Math.abs(x) > Math.abs(y)) {
+    return x > 0 ? -90 : 90;
   }
+  return y > 0 ? 0 : 180;
 }
 
 export default function CameraScreen() {
@@ -35,6 +31,7 @@ export default function CameraScreen() {
   const [capturing, setCapturing] = useState(false);
   const [isUltraWide, setIsUltraWide] = useState(true);
   const rotateAnim = useRef(new Animated.Value(0)).current;
+  const lastRotation = useRef(0);
 
   // Use a single multi-camera device that includes both lenses
   const device = useCameraDevice('back', {
@@ -48,30 +45,22 @@ export default function CameraScreen() {
   const wideZoom = device?.neutralZoom ?? 1;
   const zoom = isUltraWide && hasUltraWide ? ultraWideZoom : wideZoom;
 
-  // Track device orientation for rotating UI elements
+  // Use accelerometer to detect physical device orientation without unlocking screen rotation
   useEffect(() => {
-    let sub: ScreenOrientation.Subscription | null = null;
-    (async () => {
-      // Unlock orientation so we can detect rotation
-      await ScreenOrientation.unlockAsync();
-      const current = await ScreenOrientation.getOrientationAsync();
-      rotateAnim.setValue(getRotation(current));
-
-      sub = ScreenOrientation.addOrientationChangeListener((event) => {
-        const deg = getRotation(event.orientationInfo.orientation);
+    Accelerometer.setUpdateInterval(500);
+    const sub = Accelerometer.addListener(({ x, y }) => {
+      const deg = getRotationFromAccel(x, y);
+      if (deg !== lastRotation.current) {
+        lastRotation.current = deg;
         Animated.timing(rotateAnim, {
           toValue: deg,
           duration: 250,
           useNativeDriver: true,
         }).start();
-      });
-    })();
+      }
+    });
 
-    return () => {
-      sub?.remove();
-      // Lock back to portrait when leaving camera
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-    };
+    return () => sub.remove();
   }, []);
 
   const iconRotation = rotateAnim.interpolate({

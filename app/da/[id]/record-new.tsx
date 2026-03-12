@@ -71,10 +71,6 @@ export default function RecordNewScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         {/* Photo preview */}
         <Image source={{ uri: tempUri }} style={styles.photo} resizeMode="cover" />
@@ -170,7 +166,6 @@ export default function RecordNewScreen() {
           </TouchableOpacity>
         </View>
       </ScrollView>
-      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
