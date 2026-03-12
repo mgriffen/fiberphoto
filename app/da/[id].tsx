@@ -6,10 +6,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack } from 'expo-router';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
-import { getDAById } from '@/db/daRepository';
-import { getRecordsByDA } from '@/db/recordRepository';
+import { getDAById, deleteDA } from '@/db/daRepository';
+import { getRecordsByDA, deleteRecordsByDA } from '@/db/recordRepository';
 import { exportDA } from '@/services/exportService';
 import { detectGapsInDA, detectGaps } from '@/utils/gapDetector';
+import { deletePhoto } from '@/services/photoService';
 import { RecordCard } from '@/components/RecordCard';
 import { GapWarning } from '@/components/GapWarning';
 import { DA, FiberRecord, GapInfo } from '@/types';
@@ -79,6 +80,55 @@ export default function DADetailScreen() {
       Alert.alert('Export Failed', e.message ?? 'Unknown error');
     } finally {
       setExporting(false);
+    }
+  };
+
+  const handleDeleteDA = () => {
+    Alert.alert(
+      'Delete DA',
+      `Are you sure you want to delete ${id}?\n\nThis will permanently delete all ${records.length} record${records.length !== 1 ? 's' : ''} and their photos. This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            // Second confirmation for DAs with records
+            if (records.length > 0) {
+              Alert.alert(
+                'Final Warning',
+                `You are about to permanently delete ${id} with ${records.length} structure${records.length !== 1 ? 's' : ''}. Type cannot be undone.`,
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: `Delete ${id}`,
+                    style: 'destructive',
+                    onPress: doDeleteDA,
+                  },
+                ]
+              );
+            } else {
+              doDeleteDA();
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const doDeleteDA = async () => {
+    try {
+      // Delete all photos
+      for (const record of records) {
+        await deletePhoto(record.photoPath);
+      }
+      // Delete records from DB
+      await deleteRecordsByDA(id);
+      // Delete DA
+      await deleteDA(id);
+      router.back();
+    } catch (e: any) {
+      Alert.alert('Delete Failed', e.message ?? 'Unknown error');
     }
   };
 
@@ -174,6 +224,11 @@ export default function DADetailScreen() {
             <Text style={styles.emptyText}>No structures recorded</Text>
             <Text style={styles.emptyHint}>Tap "+ New Record" to photograph your first structure</Text>
           </View>
+        }
+        ListFooterComponent={
+          <TouchableOpacity style={styles.deleteDABtn} onPress={handleDeleteDA}>
+            <Text style={styles.deleteDAText}>Delete {da.id}</Text>
+          </TouchableOpacity>
         }
         contentContainerStyle={{ paddingBottom: spacing.xl }}
       />
@@ -285,4 +340,19 @@ const styles = StyleSheet.create({
   },
   disabled: { opacity: 0.5 },
   errorText: { fontSize: 16, color: colors.danger },
+  deleteDABtn: {
+    marginHorizontal: spacing.md,
+    marginTop: spacing.xl,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 2,
+    borderColor: colors.danger,
+    backgroundColor: colors.dangerLight,
+    alignItems: 'center',
+  },
+  deleteDAText: {
+    color: colors.danger,
+    fontSize: 14,
+    fontWeight: '700',
+  },
 });
