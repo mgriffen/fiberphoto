@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "fiberphoto",
+    "name": "FiberPhoto",
     "slug": "fiberphoto",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -9,22 +9,53 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#1a2332"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": false,
+      "bundleIdentifier": "com.mcn.fiberphoto",
+      "infoPlist": {
+        "NSCameraUsageDescription": "FiberPhoto needs camera access to photograph fiber structures.",
+        "NSPhotoLibraryUsageDescription": "FiberPhoto needs photo library access to save structure photos."
+      }
     },
     "android": {
+      "package": "com.mcn.fiberphoto",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#1a2332",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-sqlite",
+      "expo-sharing",
+      "expo-font",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "FiberPhoto needs camera access to photograph fiber structures."
+        }
+      ]
+    ],
+    "scheme": "fiberphoto",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "c1ab63cf-b2d3-4e6a-9730-5843707734b7"
+      }
     }
   }
 }
