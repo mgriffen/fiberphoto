@@ -1,36 +1,65 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Alert
+  View, Text, TouchableOpacity, StyleSheet, Alert, Linking
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import {
+  Camera,
+  useCameraDevice,
+  useCameraPermission,
+  PhotoFile,
+} from 'react-native-vision-camera';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { colors, spacing } from '@/components/theme';
 
 export default function CameraScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const cameraRef = useRef<CameraView>(null);
-  const [permission, requestPermission] = useCameraPermissions();
+  const cameraRef = useRef<Camera>(null);
+  const { hasPermission, requestPermission } = useCameraPermission();
   const [capturing, setCapturing] = useState(false);
+  const [useUltraWide, setUseUltraWide] = useState(true);
 
-  useEffect(() => {
-    if (permission && !permission.granted && permission.canAskAgain) {
-      requestPermission();
+  // Try ultra-wide first, fall back to wide
+  const ultraWideDevice = useCameraDevice('back', {
+    physicalDevices: ['ultra-wide-angle-camera'],
+  });
+  const wideDevice = useCameraDevice('back', {
+    physicalDevices: ['wide-angle-camera'],
+  });
+
+  const device = useUltraWide && ultraWideDevice ? ultraWideDevice : wideDevice;
+  const hasUltraWide = !!ultraWideDevice;
+
+  const handlePermission = useCallback(async () => {
+    const granted = await requestPermission();
+    if (!granted) {
+      Alert.alert(
+        'Camera Permission',
+        'Camera access is required. Please enable it in Settings.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        ]
+      );
     }
-  }, [permission]);
+  }, [requestPermission]);
 
-  if (!permission) {
-    return <View style={styles.container} />;
-  }
-
-  if (!permission.granted) {
+  if (!hasPermission) {
     return (
       <SafeAreaView style={styles.container}>
         <Text style={styles.permText}>Camera access is required to take photos.</Text>
-        <TouchableOpacity style={styles.btn} onPress={requestPermission}>
+        <TouchableOpacity style={styles.btn} onPress={handlePermission}>
           <Text style={styles.btnText}>Grant Camera Access</Text>
         </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+
+  if (!device) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <Text style={styles.permText}>No camera device found.</Text>
       </SafeAreaView>
     );
   }
@@ -39,12 +68,12 @@ export default function CameraScreen() {
     if (!cameraRef.current || capturing) return;
     setCapturing(true);
     try {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 1 });
-      if (!photo) throw new Error('No photo captured');
-      // Navigate to metadata form, passing the temp URI
+      const photo: PhotoFile = await cameraRef.current.takePhoto({
+        flash: 'off',
+      });
       router.replace({
         pathname: `/da/${id}/record-new`,
-        params: { tempUri: photo.uri },
+        params: { tempUri: `file://${photo.path}` },
       });
     } catch (e: any) {
       Alert.alert('Capture Error', e.message ?? 'Failed to take photo');
@@ -54,7 +83,13 @@ export default function CameraScreen() {
 
   return (
     <View style={styles.container}>
-      <CameraView ref={cameraRef} style={styles.camera} facing="back" zoom={0} />
+      <Camera
+        ref={cameraRef}
+        style={styles.camera}
+        device={device}
+        isActive={true}
+        photo={true}
+      />
       <SafeAreaView style={styles.overlay} pointerEvents="box-none">
         {/* Top bar */}
         <View style={styles.topBar}>
@@ -62,7 +97,16 @@ export default function CameraScreen() {
             <Text style={styles.cancelText}>Cancel</Text>
           </TouchableOpacity>
           <Text style={styles.daLabel}>{id}</Text>
-          <View style={{ width: 70 }} />
+          {hasUltraWide ? (
+            <TouchableOpacity
+              style={styles.lensBtn}
+              onPress={() => setUseUltraWide(prev => !prev)}
+            >
+              <Text style={styles.lensText}>{useUltraWide ? '0.5x' : '1x'}</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={{ width: 50 }} />
+          )}
         </View>
 
         {/* Capture button */}
@@ -106,6 +150,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     fontFamily: 'Courier New',
+  },
+  lensBtn: {
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    borderRadius: 20,
+    width: 50,
+    height: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  lensText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
   },
   bottomBar: {
     paddingBottom: spacing.xl + spacing.lg,

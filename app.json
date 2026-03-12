@@ -48,6 +48,12 @@
         {
           "cameraPermission": "FiberPhoto needs camera access to photograph fiber structures."
         }
+      ],
+      [
+        "react-native-vision-camera",
+        {
+          "cameraPermissionText": "FiberPhoto needs camera access to photograph fiber structures."
+        }
       ]
     ],
     "scheme": "fiberphoto",
