@@ -15,10 +15,8 @@ import { colors, spacing } from '@/components/theme';
 
 /** Determine icon rotation from accelerometer data */
 function getRotationFromAccel(x: number, y: number): number {
-  // x ~ -1 = landscape left (home button right), x ~ 1 = landscape right
-  // y ~ -1 = upside down, y ~ 1 = portrait
   if (Math.abs(x) > Math.abs(y)) {
-    return x > 0 ? -90 : 90;
+    return x > 0 ? 90 : -90;
   }
   return y > 0 ? 0 : 180;
 }
