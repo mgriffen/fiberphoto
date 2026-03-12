@@ -1,6 +1,6 @@
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Alert, Linking
+  View, Text, TouchableOpacity, StyleSheet, Alert, Linking, Animated
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -9,8 +9,23 @@ import {
   useCameraPermission,
   PhotoFile,
 } from 'react-native-vision-camera';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { colors, spacing } from '@/components/theme';
+
+/** Map orientation enum to rotation degrees for UI elements */
+function getRotation(orientation: ScreenOrientation.Orientation): number {
+  switch (orientation) {
+    case ScreenOrientation.Orientation.LANDSCAPE_LEFT:
+      return 90;
+    case ScreenOrientation.Orientation.LANDSCAPE_RIGHT:
+      return -90;
+    case ScreenOrientation.Orientation.PORTRAIT_DOWN:
+      return 180;
+    default:
+      return 0;
+  }
+}
 
 export default function CameraScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -18,18 +33,51 @@ export default function CameraScreen() {
   const cameraRef = useRef<Camera>(null);
   const { hasPermission, requestPermission } = useCameraPermission();
   const [capturing, setCapturing] = useState(false);
-  const [useUltraWide, setUseUltraWide] = useState(true);
+  const [isUltraWide, setIsUltraWide] = useState(true);
+  const rotateAnim = useRef(new Animated.Value(0)).current;
 
-  // Try ultra-wide first, fall back to wide
-  const ultraWideDevice = useCameraDevice('back', {
-    physicalDevices: ['ultra-wide-angle-camera'],
-  });
-  const wideDevice = useCameraDevice('back', {
-    physicalDevices: ['wide-angle-camera'],
+  // Use a single multi-camera device that includes both lenses
+  const device = useCameraDevice('back', {
+    physicalDevices: ['ultra-wide-angle-camera', 'wide-angle-camera'],
   });
 
-  const device = useUltraWide && ultraWideDevice ? ultraWideDevice : wideDevice;
-  const hasUltraWide = !!ultraWideDevice;
+  const hasUltraWide = device?.physicalDevices?.includes('ultra-wide-angle-camera') ?? false;
+
+  // Zoom: minZoom = ultra-wide, neutralZoom = standard wide
+  const ultraWideZoom = device?.minZoom ?? 1;
+  const wideZoom = device?.neutralZoom ?? 1;
+  const zoom = isUltraWide && hasUltraWide ? ultraWideZoom : wideZoom;
+
+  // Track device orientation for rotating UI elements
+  useEffect(() => {
+    let sub: ScreenOrientation.Subscription | null = null;
+    (async () => {
+      // Unlock orientation so we can detect rotation
+      await ScreenOrientation.unlockAsync();
+      const current = await ScreenOrientation.getOrientationAsync();
+      rotateAnim.setValue(getRotation(current));
+
+      sub = ScreenOrientation.addOrientationChangeListener((event) => {
+        const deg = getRotation(event.orientationInfo.orientation);
+        Animated.timing(rotateAnim, {
+          toValue: deg,
+          duration: 250,
+          useNativeDriver: true,
+        }).start();
+      });
+    })();
+
+    return () => {
+      sub?.remove();
+      // Lock back to portrait when leaving camera
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+    };
+  }, []);
+
+  const iconRotation = rotateAnim.interpolate({
+    inputRange: [-90, 0, 90, 180],
+    outputRange: ['-90deg', '0deg', '90deg', '180deg'],
+  });
 
   const handlePermission = useCallback(async () => {
     const granted = await requestPermission();
@@ -89,20 +137,27 @@ export default function CameraScreen() {
         device={device}
         isActive={true}
         photo={true}
+        zoom={zoom}
       />
       <SafeAreaView style={styles.overlay} pointerEvents="box-none">
         {/* Top bar */}
         <View style={styles.topBar}>
           <TouchableOpacity onPress={() => router.back()} style={styles.cancelBtn}>
-            <Text style={styles.cancelText}>Cancel</Text>
+            <Animated.Text style={[styles.cancelText, { transform: [{ rotate: iconRotation }] }]}>
+              Cancel
+            </Animated.Text>
           </TouchableOpacity>
-          <Text style={styles.daLabel}>{id}</Text>
+          <Animated.Text style={[styles.daLabel, { transform: [{ rotate: iconRotation }] }]}>
+            {id}
+          </Animated.Text>
           {hasUltraWide ? (
             <TouchableOpacity
               style={styles.lensBtn}
-              onPress={() => setUseUltraWide(prev => !prev)}
+              onPress={() => setIsUltraWide(prev => !prev)}
             >
-              <Text style={styles.lensText}>{useUltraWide ? '0.5x' : '1x'}</Text>
+              <Animated.Text style={[styles.lensText, { transform: [{ rotate: iconRotation }] }]}>
+                {isUltraWide ? '0.5x' : '1x'}
+              </Animated.Text>
             </TouchableOpacity>
           ) : (
             <View style={{ width: 50 }} />
