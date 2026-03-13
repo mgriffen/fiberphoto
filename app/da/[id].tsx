@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
-  Alert, ActivityIndicator
+  Alert, ActivityIndicator, RefreshControl
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack } from 'expo-router';
@@ -9,22 +9,22 @@ import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { getDAById, deleteDA } from '@/db/daRepository';
 import { getRecordsByDA, deleteRecordsByDA } from '@/db/recordRepository';
 import { exportDA } from '@/services/exportService';
-import { detectGapsInDA, detectGaps } from '@/utils/gapDetector';
 import { deletePhoto } from '@/services/photoService';
 import { RecordCard } from '@/components/RecordCard';
-import { GapWarning } from '@/components/GapWarning';
-import { DA, FiberRecord, GapInfo } from '@/types';
+import { useSyncContext } from '@/context/SyncContext';
+import { DA, FiberRecord } from '@/types';
 import { colors, spacing, radius } from '@/components/theme';
 
 export default function DADetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const { triggerSync } = useSyncContext();
 
   const [da, setDA] = useState<DA | null>(null);
   const [records, setRecords] = useState<FiberRecord[]>([]);
-  const [gapInfo, setGapInfo] = useState<GapInfo>({ hasGaps: false, gaps: [], affectedDAs: [] });
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -34,16 +34,21 @@ export default function DADetailScreen() {
 
   async function load() {
     setLoading(true);
-    const [daData, recs, gaps] = await Promise.all([
+    const [daData, recs] = await Promise.all([
       getDAById(id),
       getRecordsByDA(id),
-      detectGaps(),
     ]);
     setDA(daData);
     setRecords(recs);
-    setGapInfo(gaps);
     setLoading(false);
   }
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await triggerSync();
+    await load();
+    setRefreshing(false);
+  };
 
   const handleNewRecord = useCallback(() => {
     router.push(`/da/${id}/camera`);
@@ -57,19 +62,7 @@ export default function DADetailScreen() {
   ), [id]);
 
   const handleExport = async () => {
-    if (gapInfo.hasGaps) {
-      Alert.alert(
-        'Sequence Gaps Detected',
-        `There are missing structure numbers (${gapInfo.gaps.slice(0, 5).join(', ')}${gapInfo.gaps.length > 5 ? '…' : ''}). ` +
-        'Your export may be incomplete. Export anyway?',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Export Anyway', onPress: doExport },
-        ]
-      );
-    } else {
-      doExport();
-    }
+    doExport();
   };
 
   const doExport = async () => {
@@ -84,24 +77,24 @@ export default function DADetailScreen() {
   };
 
   const handleDeleteDA = () => {
+    if (!da) return;
     Alert.alert(
       'Delete DA',
-      `Are you sure you want to delete ${id}?\n\nThis will permanently delete all ${records.length} record${records.length !== 1 ? 's' : ''} and their photos. This cannot be undone.`,
+      `Are you sure you want to delete ${da.name}?\n\nThis will permanently delete all ${records.length} record${records.length !== 1 ? 's' : ''} and their photos. This cannot be undone.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete',
           style: 'destructive',
           onPress: () => {
-            // Second confirmation for DAs with records
             if (records.length > 0) {
               Alert.alert(
                 'Final Warning',
-                `You are about to permanently delete ${id} with ${records.length} structure${records.length !== 1 ? 's' : ''}. Type cannot be undone.`,
+                `You are about to permanently delete ${da.name} with ${records.length} structure${records.length !== 1 ? 's' : ''}. This cannot be undone.`,
                 [
                   { text: 'Cancel', style: 'cancel' },
                   {
-                    text: `Delete ${id}`,
+                    text: `Delete ${da.name}`,
                     style: 'destructive',
                     onPress: doDeleteDA,
                   },
@@ -118,13 +111,10 @@ export default function DADetailScreen() {
 
   const doDeleteDA = async () => {
     try {
-      // Delete all photos
       for (const record of records) {
         await deletePhoto(record.photoPath);
       }
-      // Delete records from DB
       await deleteRecordsByDA(id);
-      // Delete DA
       await deleteDA(id);
       router.back();
     } catch (e: any) {
@@ -150,7 +140,7 @@ export default function DADetailScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <Stack.Screen options={{ title: da.id }} />
+      <Stack.Screen options={{ title: da.name }} />
       <FlatList
         data={records}
         keyExtractor={item => item.id}
@@ -159,7 +149,7 @@ export default function DADetailScreen() {
           <>
             {/* DA header */}
             <View style={styles.daHeader}>
-              <Text style={styles.daId}>{da.id}</Text>
+              <Text style={styles.daId}>{da.name}</Text>
               <View style={styles.statsRow}>
                 <View style={styles.statBubble}>
                   <Text style={styles.statNum}>{records.length}</Text>
@@ -192,11 +182,6 @@ export default function DADetailScreen() {
               </View>
             </View>
 
-            {/* Gap warning scoped to this DA */}
-            {gapInfo.hasGaps && (
-              <GapWarning gapInfo={gapInfo} />
-            )}
-
             {/* Action buttons */}
             <View style={styles.actions}>
               <TouchableOpacity style={styles.newBtn} onPress={handleNewRecord}>
@@ -227,10 +212,18 @@ export default function DADetailScreen() {
         }
         ListFooterComponent={
           <TouchableOpacity style={styles.deleteDABtn} onPress={handleDeleteDA}>
-            <Text style={styles.deleteDAText}>Delete {da.id}</Text>
+            <Text style={styles.deleteDAText}>Delete {da.name}</Text>
           </TouchableOpacity>
         }
         contentContainerStyle={{ paddingBottom: spacing.xl }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.accent}
+            colors={[colors.accent]}
+          />
+        }
       />
     </SafeAreaView>
   );

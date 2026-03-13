@@ -1,7 +1,6 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { buildPhotoFilename } from '../utils/idGenerator';
-import { StructureTypeId } from '../types';
 
 const PHOTOS_DIR = `${FileSystem.documentDirectory}fiberphoto-photos/`;
 
@@ -13,13 +12,12 @@ export async function ensurePhotosDir(): Promise<void> {
 }
 
 /**
- * Compresses a photo from the camera and saves it with the record ID filename.
+ * Compresses a photo from the camera and saves it with the record UUID filename.
  * Returns the permanent local path.
  */
 export async function savePhoto(
   tempUri: string,
-  typeAbbrev: StructureTypeId,
-  seqNum: number
+  recordId: string
 ): Promise<string> {
   await ensurePhotosDir();
 
@@ -29,26 +27,11 @@ export async function savePhoto(
     { compress: 0.78, format: ImageManipulator.SaveFormat.JPEG }
   );
 
-  const filename = buildPhotoFilename(typeAbbrev, seqNum);
+  const filename = buildPhotoFilename(recordId);
   const dest = `${PHOTOS_DIR}${filename}`;
   await FileSystem.copyAsync({ from: compressed.uri, to: dest });
 
   return dest;
-}
-
-/**
- * Renames a photo file on disk when a record is renumbered.
- * Returns the new path.
- */
-export async function renamePhoto(
-  oldPath: string,
-  newTypeAbbrev: StructureTypeId,
-  newSeqNum: number
-): Promise<string> {
-  const newFilename = buildPhotoFilename(newTypeAbbrev, newSeqNum);
-  const newPath = `${PHOTOS_DIR}${newFilename}`;
-  await FileSystem.moveAsync({ from: oldPath, to: newPath });
-  return newPath;
 }
 
 /** Deletes a photo file from disk. */

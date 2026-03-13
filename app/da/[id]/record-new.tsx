@@ -8,7 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { createRecord } from '@/db/recordRepository';
 import { savePhoto } from '@/services/photoService';
-import { getNextSequenceNum } from '@/utils/idGenerator';
+import { generateUUID } from '@/utils/idGenerator';
 import { isValidTerminalDesignation } from '@/utils/validators';
 import { StructureTypePicker } from '@/components/StructureTypePicker';
 import { useAppContext } from '@/context/AppContext';
@@ -40,8 +40,9 @@ export default function RecordNewScreen() {
 
     setSaving(true);
     try {
-      const seqNum = await getNextSequenceNum();
-      const photoPath = await savePhoto(tempUri, typeAbbrev, seqNum);
+      // Generate UUID for this record before saving photo
+      const recordId = generateUUID();
+      const photoPath = await savePhoto(tempUri, recordId);
 
       await createRecord(
         {
@@ -54,7 +55,8 @@ export default function RecordNewScreen() {
           terminalDesignation: hasTerminal ? terminalDes.trim() : undefined,
           notes: notes.trim() || undefined,
         },
-        userName || 'Unknown'
+        userName || 'Unknown',
+        recordId
       );
 
       // Navigate back to DA detail (replaces stack so we don't land on home)

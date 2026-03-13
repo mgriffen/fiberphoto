@@ -2,34 +2,39 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import JSZip from 'jszip';
 import { getRecordsByDA } from '../db/recordRepository';
+import { getDAById } from '../db/daRepository';
 import { readPhotoAsBase64 } from './photoService';
 import { ExportRecord, FiberRecord } from '../types';
 
 const EXPORT_DIR = `${FileSystem.cacheDirectory}fiberphoto-exports/`;
 
 export async function exportDA(daId: string): Promise<void> {
-  const records = await getRecordsByDA(daId);
+  const [records, da] = await Promise.all([
+    getRecordsByDA(daId),
+    getDAById(daId),
+  ]);
+  const daName = da?.name ?? daId;
 
   if (records.length === 0) {
     throw new Error('No records to export.');
   }
 
   const zip = new JSZip();
-  const folder = zip.folder(daId)!;
+  const folder = zip.folder(daName)!;
 
   // Add each photo
   for (const record of records) {
-    const filename = `${record.id}.jpg`;
+    const filename = `${record.displayId}.jpg`;
     const base64 = await readPhotoAsBase64(record.photoPath);
     folder.file(filename, base64, { base64: true });
   }
 
   // Build CSV
-  const csv = buildCSV(records);
+  const csv = buildCSV(records, daName);
   folder.file('records.csv', csv);
 
   // Build JSON
-  const json = buildJSON(records);
+  const json = buildJSON(records, daName);
   folder.file('records.json', json);
 
   // Generate ZIP
@@ -41,7 +46,7 @@ export async function exportDA(daId: string): Promise<void> {
     await FileSystem.makeDirectoryAsync(EXPORT_DIR, { intermediates: true });
   }
 
-  const zipPath = `${EXPORT_DIR}${daId}-export.zip`;
+  const zipPath = `${EXPORT_DIR}${daName}-export.zip`;
   await FileSystem.writeAsStringAsync(zipPath, zipBase64, {
     encoding: FileSystem.EncodingType.Base64,
   });
@@ -52,17 +57,18 @@ export async function exportDA(daId: string): Promise<void> {
 
   await Sharing.shareAsync(zipPath, {
     mimeType: 'application/zip',
-    dialogTitle: `Export ${daId}`,
+    dialogTitle: `Export ${daName}`,
     UTI: 'public.zip-archive',
   });
 }
 
 // ─── CSV ─────────────────────────────────────────────────────────────────
 
-function buildCSV(records: FiberRecord[]): string {
+function buildCSV(records: FiberRecord[], daName: string): string {
   const headers = [
     'record_id',
-    'da_id',
+    'display_id',
+    'da_name',
     'photo_filename',
     'structure_type',
     'has_sc',
@@ -76,8 +82,9 @@ function buildCSV(records: FiberRecord[]): string {
 
   const rows = records.map(r => [
     r.id,
-    r.daId,
-    `${r.id}.jpg`,
+    r.displayId,
+    daName,
+    `${r.displayId}.jpg`,
     r.structureType,
     r.hasSC ? 'yes' : 'no',
     r.hasTerminal ? 'yes' : 'no',
@@ -100,11 +107,12 @@ function csvEscape(value: string): string {
 
 // ─── JSON ────────────────────────────────────────────────────────────────
 
-function buildJSON(records: FiberRecord[]): string {
+function buildJSON(records: FiberRecord[], daName: string): string {
   const exportRecords: ExportRecord[] = records.map(r => ({
     record_id: r.id,
-    da_id: r.daId,
-    photo_filename: `${r.id}.jpg`,
+    display_id: r.displayId,
+    da_name: daName,
+    photo_filename: `${r.displayId}.jpg`,
     structure_type: r.structureType,
     has_sc: r.hasSC ? 'yes' : 'no',
     has_terminal: r.hasTerminal ? 'yes' : 'no',
@@ -115,5 +123,5 @@ function buildJSON(records: FiberRecord[]): string {
     updated_at: r.updatedAt,
   }));
 
-  return JSON.stringify({ da_id: records[0]?.daId, records: exportRecords }, null, 2);
+  return JSON.stringify({ da_name: daName, records: exportRecords }, null, 2);
 }

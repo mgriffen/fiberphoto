@@ -1,6 +1,6 @@
 import { getDatabase } from './database';
 import { FiberRecord, NewRecordPayload, EditRecordPayload } from '../types';
-import { getNextSequenceNum, buildRecordId } from '../utils/idGenerator';
+import { generateUUID, buildDisplayId, buildPhotoFilename } from '../utils/idGenerator';
 import { touchDA } from './daRepository';
 
 // ─── Read ──────────────────────────────────────────────────────────────────
@@ -31,39 +31,41 @@ export async function getAllRecords(): Promise<FiberRecord[]> {
   return rows.map(rowToRecord);
 }
 
-export async function getAllSequenceNums(): Promise<number[]> {
-  const db = await getDatabase();
-  const rows = await db.getAllAsync<{ sequence_num: number }>(
-    'SELECT sequence_num FROM records ORDER BY sequence_num ASC'
-  );
-  return rows.map(r => r.sequence_num);
-}
-
-export async function getMaxSequenceNum(): Promise<number> {
+export async function getMaxSequenceNumForDA(daId: string): Promise<number> {
   const db = await getDatabase();
   const row = await db.getFirstAsync<{ max_seq: number | null }>(
-    'SELECT MAX(sequence_num) as max_seq FROM records'
+    'SELECT MAX(sequence_num) as max_seq FROM records WHERE da_id = ?',
+    daId
   );
   return row?.max_seq ?? 0;
+}
+
+export async function getNextSequenceNumForDA(daId: string): Promise<number> {
+  const maxSeq = await getMaxSequenceNumForDA(daId);
+  if (maxSeq > 0) return maxSeq + 1;
+  // No records yet — check if a starting number was set
+  const startNum = await getSetting(`start_seq_${daId}`);
+  return startNum ? parseInt(startNum, 10) : 1;
 }
 
 // ─── Create ────────────────────────────────────────────────────────────────
 
 export async function createRecord(
   payload: NewRecordPayload,
-  recordedBy: string
+  recordedBy: string,
+  preGeneratedId?: string
 ): Promise<FiberRecord> {
   const db = await getDatabase();
+  const id = preGeneratedId ?? generateUUID();
   const now = new Date().toISOString();
-  const seqNum = await getNextSequenceNum();
-  const id = buildRecordId(payload.typeAbbrev, seqNum);
+  const seqNum = await getNextSequenceNumForDA(payload.daId);
 
   await db.runAsync(
     `INSERT INTO records
       (id, sequence_num, da_id, type_abbrev, structure_type, photo_path,
        has_sc, has_terminal, terminal_designation, notes, recorded_by,
-       created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       created_at, updated_at, sync_status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     seqNum,
     payload.daId,
@@ -76,13 +78,15 @@ export async function createRecord(
     payload.notes ?? null,
     recordedBy,
     now,
-    now
+    now,
+    'pending'
   );
 
   await touchDA(payload.daId);
 
   return {
     id,
+    displayId: buildDisplayId(payload.typeAbbrev, seqNum),
     sequenceNum: seqNum,
     daId: payload.daId,
     typeAbbrev: payload.typeAbbrev,
@@ -95,6 +99,7 @@ export async function createRecord(
     recordedBy,
     createdAt: now,
     updatedAt: now,
+    syncStatus: 'pending',
   };
 }
 
@@ -107,19 +112,16 @@ export async function updateRecord(
   const db = await getDatabase();
   const now = new Date().toISOString();
 
-  // If type abbreviation changed the record ID changes too
   const existing = await getRecordById(id);
   if (!existing) throw new Error(`Record ${id} not found`);
 
-  const newId = buildRecordId(payload.typeAbbrev, existing.sequenceNum);
-
   await db.runAsync(
     `UPDATE records SET
-       id = ?, type_abbrev = ?, structure_type = ?,
+       type_abbrev = ?, structure_type = ?,
        has_sc = ?, has_terminal = ?,
-       terminal_designation = ?, notes = ?, updated_at = ?
+       terminal_designation = ?, notes = ?,
+       updated_at = ?, sync_status = ?
      WHERE id = ?`,
-    newId,
     payload.typeAbbrev,
     payload.structureType,
     payload.hasSC ? 1 : 0,
@@ -127,6 +129,7 @@ export async function updateRecord(
     payload.terminalDesignation ?? null,
     payload.notes ?? null,
     now,
+    'modified',
     id
   );
 
@@ -148,38 +151,6 @@ export async function deleteRecordsByDA(daId: string): Promise<FiberRecord[]> {
   const records = await getRecordsByDA(daId);
   await db.runAsync('DELETE FROM records WHERE da_id = ?', daId);
   return records; // return so callers can clean up photo files
-}
-
-// ─── Cascade renumber ─────────────────────────────────────────────────────
-// Decrements sequence_num (and rebuilds id) for all records where
-// sequence_num > afterSequence. Caller handles photo file renames.
-
-export async function cascadeDecrement(afterSequence: number): Promise<FiberRecord[]> {
-  const db = await getDatabase();
-
-  // Get all affected records ordered ascending so we process lowest first
-  // (avoids UNIQUE constraint collision on sequence_num during update)
-  const affected = await db.getAllAsync<RawRecord>(
-    'SELECT * FROM records WHERE sequence_num > ? ORDER BY sequence_num ASC',
-    afterSequence
-  );
-
-  const updated: FiberRecord[] = [];
-
-  for (const raw of affected) {
-    const newSeq = raw.sequence_num - 1;
-    const newId = `${raw.type_abbrev}${newSeq}`;
-    const now = new Date().toISOString();
-
-    await db.runAsync(
-      'UPDATE records SET id = ?, sequence_num = ?, updated_at = ? WHERE id = ?',
-      newId, newSeq, now, raw.id
-    );
-
-    updated.push(rowToRecord({ ...raw, id: newId, sequence_num: newSeq, updated_at: now }));
-  }
-
-  return updated;
 }
 
 // ─── Settings ─────────────────────────────────────────────────────────────
@@ -210,6 +181,7 @@ interface RawRecord {
   type_abbrev: string;
   structure_type: string;
   photo_path: string;
+  photo_url: string | null;
   has_sc: number;
   has_terminal: number;
   terminal_designation: string | null;
@@ -217,16 +189,19 @@ interface RawRecord {
   recorded_by: string;
   created_at: string;
   updated_at: string;
+  sync_status: string;
 }
 
 function rowToRecord(row: RawRecord): FiberRecord {
   return {
     id: row.id,
+    displayId: buildDisplayId(row.type_abbrev as FiberRecord['typeAbbrev'], row.sequence_num),
     sequenceNum: row.sequence_num,
     daId: row.da_id,
     typeAbbrev: row.type_abbrev as FiberRecord['typeAbbrev'],
     structureType: row.structure_type,
     photoPath: row.photo_path,
+    photoUrl: row.photo_url ?? undefined,
     hasSC: row.has_sc === 1,
     hasTerminal: row.has_terminal === 1,
     terminalDesignation: row.terminal_designation ?? undefined,
@@ -234,5 +209,6 @@ function rowToRecord(row: RawRecord): FiberRecord {
     recordedBy: row.recorded_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    syncStatus: row.sync_status as FiberRecord['syncStatus'],
   };
 }

@@ -27,21 +27,29 @@ export const STRUCTURE_OPTIONS = [
   { value: 'BP',        label: 'BP (Bore Pit)',          abbreviation: 'BP' as StructureTypeId },
 ];
 
+// ─── Sync status for offline-first ──────────
+export type SyncStatus = 'pending' | 'synced' | 'modified' | 'deleted';
+
 // ─── Distribution Area ────────────────────────
 export interface DA {
-  id: string;         // 'DA001'
+  id: string;         // UUID
+  name: string;       // User-facing label, e.g. 'DA001'
+  createdBy?: string; // User ID (set after auth is implemented)
   createdAt: string;  // ISO timestamp
   updatedAt: string;
+  syncStatus: SyncStatus;
 }
 
 // ─── Fiber Structure Record ───────────────────
 export interface FiberRecord {
-  id: string;                   // 'HH27' — typeAbbrev + sequenceNum
-  sequenceNum: number;          // 27 — global across all DAs
-  daId: string;                 // 'DA001'
+  id: string;                   // UUID
+  displayId: string;            // e.g. 'HH27' — typeAbbrev + sequenceNum (for display)
+  sequenceNum: number;          // Display-only, ordered by created_at within DA
+  daId: string;                 // UUID of parent DA
   typeAbbrev: StructureTypeId;  // 'HH'
   structureType: string;        // 'HH 17x30'
   photoPath: string;            // absolute local path to compressed JPEG
+  photoUrl?: string;            // cloud storage URL (set after sync)
   hasSC: boolean;               // Splice Enclosure present
   hasTerminal: boolean;         // Indexed Terminal present
   terminalDesignation?: string; // '2.13' — required if hasTerminal
@@ -49,6 +57,7 @@ export interface FiberRecord {
   recordedBy: string;
   createdAt: string;
   updatedAt: string;
+  syncStatus: SyncStatus;
 }
 
 // ─── New record payload (before DB insert) ────
@@ -78,17 +87,11 @@ export interface AppSettings {
   userName: string;
 }
 
-// ─── Gap detection ────────────────────────────
-export interface GapInfo {
-  hasGaps: boolean;
-  gaps: number[];           // missing sequence numbers
-  affectedDAs: string[];    // DA IDs that contain records after the first gap
-}
-
 // ─── Export ───────────────────────────────────
 export interface ExportRecord {
   record_id: string;
-  da_id: string;
+  display_id: string;
+  da_name: string;
   photo_filename: string;
   structure_type: string;
   has_sc: string;

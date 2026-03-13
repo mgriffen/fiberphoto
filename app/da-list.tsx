@@ -1,15 +1,14 @@
 import React, { useCallback, useState } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
-  TextInput, ActivityIndicator
+  TextInput, ActivityIndicator, RefreshControl
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { getAllDAs } from '@/db/daRepository';
 import { getRecordsByDA } from '@/db/recordRepository';
-import { detectGaps } from '@/utils/gapDetector';
-import { GapWarning } from '@/components/GapWarning';
-import { DA, GapInfo } from '@/types';
+import { useSyncContext } from '@/context/SyncContext';
+import { DA } from '@/types';
 import { colors, spacing, radius } from '@/components/theme';
 
 interface DAWithCount extends DA {
@@ -18,11 +17,12 @@ interface DAWithCount extends DA {
 
 export default function DAListScreen() {
   const router = useRouter();
+  const { syncState, isOnline, triggerSync } = useSyncContext();
   const [das, setDas] = useState<DAWithCount[]>([]);
   const [filtered, setFiltered] = useState<DAWithCount[]>([]);
   const [search, setSearch] = useState('');
-  const [gapInfo, setGapInfo] = useState<GapInfo>({ hasGaps: false, gaps: [], affectedDAs: [] });
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -39,16 +39,25 @@ export default function DAListScreen() {
         return { ...da, recordCount: records.length };
       })
     );
-    const gaps = await detectGaps();
     setDas(withCounts);
     setFiltered(withCounts);
-    setGapInfo(gaps);
     setLoading(false);
   }
 
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  };
+
+  const handleSync = async () => {
+    await triggerSync();
+    await load();
+  };
+
   const handleSearch = (text: string) => {
     setSearch(text);
-    setFiltered(das.filter(d => d.id.toUpperCase().includes(text.toUpperCase())));
+    setFiltered(das.filter(d => d.name.toUpperCase().includes(text.toUpperCase())));
   };
 
   const renderItem = useCallback(({ item }: { item: DAWithCount }) => (
@@ -58,19 +67,21 @@ export default function DAListScreen() {
       activeOpacity={0.75}
     >
       <View style={styles.rowLeft}>
-        <Text style={styles.daId}>{item.id}</Text>
+        <Text style={styles.daId}>{item.name}</Text>
         <Text style={styles.count}>
           {item.recordCount} structure{item.recordCount !== 1 ? 's' : ''}
         </Text>
       </View>
-      {gapInfo.affectedDAs.includes(item.id) && (
-        <View style={styles.gapBadge}>
-          <Text style={styles.gapBadgeText}>GAP</Text>
+      {item.syncStatus !== 'synced' && (
+        <View style={styles.pendingBadge}>
+          <Text style={styles.pendingBadgeText}>
+            {item.syncStatus === 'pending' ? 'NEW' : 'EDITED'}
+          </Text>
         </View>
       )}
       <Text style={styles.chevron}>›</Text>
     </TouchableOpacity>
-  ), [gapInfo.affectedDAs]);
+  ), []);
 
   if (loading) {
     return (
@@ -82,7 +93,29 @@ export default function DAListScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <GapWarning gapInfo={gapInfo} />
+      {/* Sync button bar */}
+      <TouchableOpacity
+        style={styles.statusBar}
+        onPress={handleSync}
+        disabled={!isOnline || syncState === 'syncing'}
+        activeOpacity={0.7}
+      >
+        <View style={[styles.statusDot, { backgroundColor: isOnline ? colors.success : colors.warning }]} />
+        <Text style={styles.statusText}>
+          {!isOnline ? 'Offline' :
+           syncState === 'syncing' ? 'Syncing...' :
+           syncState === 'error' ? 'Sync error' :
+           'Online'}
+        </Text>
+        {isOnline && syncState !== 'syncing' && (
+          <View style={styles.syncBtn}>
+            <Text style={styles.syncBtnText}>Sync Now</Text>
+          </View>
+        )}
+        {syncState === 'syncing' && (
+          <ActivityIndicator size="small" color={colors.accent} style={{ marginLeft: 'auto' }} />
+        )}
+      </TouchableOpacity>
 
       <TextInput
         style={styles.search}
@@ -104,6 +137,14 @@ export default function DAListScreen() {
           keyExtractor={item => item.id}
           renderItem={renderItem}
           contentContainerStyle={{ paddingBottom: spacing.xl }}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={colors.accent}
+              colors={[colors.accent]}
+            />
+          }
         />
       )}
     </SafeAreaView>
@@ -113,6 +154,38 @@ export default function DAListScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  statusBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    backgroundColor: colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: spacing.sm,
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  syncBtn: {
+    marginLeft: 'auto',
+    backgroundColor: colors.accent,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm + 4,
+    paddingVertical: spacing.xs + 2,
+  },
+  syncBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#fff',
+  },
   search: {
     backgroundColor: colors.surface,
     borderWidth: 2,
@@ -149,17 +222,17 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 2,
   },
-  gapBadge: {
-    backgroundColor: colors.warningLight,
+  pendingBadge: {
+    backgroundColor: colors.accentLight,
     borderRadius: radius.sm,
     paddingHorizontal: 8,
     paddingVertical: 3,
     marginRight: spacing.sm,
   },
-  gapBadgeText: {
-    fontSize: 11,
+  pendingBadgeText: {
+    fontSize: 10,
     fontWeight: '700',
-    color: colors.warning,
+    color: colors.accent,
   },
   chevron: {
     fontSize: 24,

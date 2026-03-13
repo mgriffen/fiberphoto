@@ -1,45 +1,25 @@
-import { getDatabase } from '../db/database';
 import { StructureTypeId } from '../types';
 
-/**
- * Returns the next available global sequence number.
- * Respects the minSequenceNum setting (for picking up after existing records).
- * Fills the lowest gap in the global sequence (at or above minSequenceNum).
- * If no gaps, returns max + 1.
- */
-export async function getNextSequenceNum(): Promise<number> {
-  const db = await getDatabase();
-
-  // Check if there's a minimum sequence number set
-  const minRow = await db.getFirstAsync<{ value: string }>(
-    "SELECT value FROM app_settings WHERE key = 'minSequenceNum'"
-  );
-  const minSeq = minRow ? parseInt(minRow.value, 10) : 1;
-
-  const rows = await db.getAllAsync<{ sequence_num: number }>(
-    'SELECT sequence_num FROM records ORDER BY sequence_num ASC'
-  );
-  const existing = rows.map(r => r.sequence_num);
-
-  if (existing.length === 0) return minSeq;
-
-  // Find lowest gap (at or above minSeq)
-  const max = existing[existing.length - 1];
-  const existingSet = new Set(existing);
-  for (let n = minSeq; n <= max; n++) {
-    if (!existingSet.has(n)) return n;
+/** Generates a UUID v4 for use as a primary key */
+export function generateUUID(): string {
+  // crypto.randomUUID is available in Hermes (Expo SDK 55+)
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
   }
-
-  // No gap — return next after max
-  return Math.max(max + 1, minSeq);
+  // Fallback for environments without crypto.randomUUID
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
 }
 
-/** Builds a record ID like 'HH27' */
-export function buildRecordId(typeAbbrev: StructureTypeId, seqNum: number): string {
+/** Builds a display ID like 'HH27' from type abbreviation and sequence number */
+export function buildDisplayId(typeAbbrev: StructureTypeId, seqNum: number): string {
   return `${typeAbbrev}${seqNum}`;
 }
 
-/** Builds a photo filename like 'HH27.jpg' */
-export function buildPhotoFilename(typeAbbrev: StructureTypeId, seqNum: number): string {
-  return `${typeAbbrev}${seqNum}.jpg`;
+/** Builds a photo filename using UUID */
+export function buildPhotoFilename(recordId: string): string {
+  return `${recordId}.jpg`;
 }

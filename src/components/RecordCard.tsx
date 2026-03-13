@@ -16,7 +16,7 @@ export const RecordCard = memo(function RecordCard({ record, onPress }: Props) {
       <Image source={{ uri: record.photoPath }} style={styles.thumb} />
       <View style={styles.info}>
         <View style={styles.topRow}>
-          <Text style={styles.id}>{record.id}</Text>
+          <Text style={styles.id}>{record.displayId}</Text>
           <View style={[styles.typePill, { backgroundColor: typeColor.bg, borderColor: typeColor.border }]}>
             <Text style={[styles.typePillText, { color: typeColor.text }]}>{record.typeAbbrev}</Text>
           </View>

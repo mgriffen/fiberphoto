@@ -11,6 +11,7 @@ import {
 } from 'react-native-vision-camera';
 import { Accelerometer } from 'expo-sensors';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { getDAById } from '@/db/daRepository';
 import { colors, spacing } from '@/components/theme';
 
 /** Determine icon rotation from accelerometer data */
@@ -27,7 +28,12 @@ export default function CameraScreen() {
   const cameraRef = useRef<Camera>(null);
   const { hasPermission, requestPermission } = useCameraPermission();
   const [capturing, setCapturing] = useState(false);
-  const [isUltraWide, setIsUltraWide] = useState(true);
+  const [isUltraWide, setIsUltraWide] = useState(false);
+  const [daName, setDaName] = useState('');
+
+  useEffect(() => {
+    getDAById(id).then(da => { if (da) setDaName(da.name); });
+  }, [id]);
   const rotateAnim = useRef(new Animated.Value(0)).current;
   const lastRotation = useRef(0);
 
@@ -135,7 +141,7 @@ export default function CameraScreen() {
             </Animated.Text>
           </TouchableOpacity>
           <Animated.Text style={[styles.daLabel, { transform: [{ rotate: iconRotation }] }]}>
-            {id}
+            {daName}
           </Animated.Text>
           {hasUltraWide ? (
             <TouchableOpacity

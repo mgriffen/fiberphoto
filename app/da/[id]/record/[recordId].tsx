@@ -7,9 +7,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { getRecordById, updateRecord, deleteRecord } from '@/db/recordRepository';
+import { getDAById } from '@/db/daRepository';
 import { deletePhoto } from '@/services/photoService';
-import { previewCascadeDecrement, performCascadeDecrement } from '@/services/renumberService';
-import { detectGaps } from '@/utils/gapDetector';
 import { isValidTerminalDesignation } from '@/utils/validators';
 import { StructureTypePicker } from '@/components/StructureTypePicker';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -21,6 +20,7 @@ export default function RecordDetailScreen() {
   const router = useRouter();
 
   const [record, setRecord] = useState<FiberRecord | null>(null);
+  const [daName, setDaName] = useState('');
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -35,17 +35,21 @@ export default function RecordDetailScreen() {
 
   // Dialog state
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [showCollapseConfirm, setShowCollapseConfirm] = useState(false);
-  const [collapsePreview, setCollapsePreview] = useState({ affectedCount: 0, affectedDAs: [] as string[] });
 
   useEffect(() => { loadRecord(); }, [recordId]);
 
   async function loadRecord() {
     setLoading(true);
-    const r = await getRecordById(recordId);
+    const [r, da] = await Promise.all([
+      getRecordById(recordId),
+      getDAById(daId),
+    ]);
     if (r) {
       setRecord(r);
       populateEdit(r);
+    }
+    if (da) {
+      setDaName(da.name);
     }
     setLoading(false);
   }
@@ -88,19 +92,7 @@ export default function RecordDetailScreen() {
   };
 
   const handleDeletePress = async () => {
-    if (!record) return;
-
-    // Check if deleting this creates a gap
-    const gaps = await detectGaps();
-    const wouldCreateGap = !gaps.hasGaps; // currently clean — delete would create one
-
-    if (wouldCreateGap) {
-      const preview = await previewCascadeDecrement(record.sequenceNum);
-      setCollapsePreview(preview);
-      setShowDeleteConfirm(true);
-    } else {
-      setShowDeleteConfirm(true);
-    }
+    setShowDeleteConfirm(true);
   };
 
   const handleConfirmDelete = async () => {
@@ -115,26 +107,6 @@ export default function RecordDetailScreen() {
     }
   };
 
-  const handleCollapsePress = async () => {
-    if (!record) return;
-    const preview = await previewCascadeDecrement(record.sequenceNum);
-    setCollapsePreview(preview);
-    setShowCollapseConfirm(true);
-  };
-
-  const handleConfirmCollapse = async () => {
-    if (!record) return;
-    setShowCollapseConfirm(false);
-    try {
-      await deletePhoto(record.photoPath);
-      await deleteRecord(record.id);
-      await performCascadeDecrement(record.sequenceNum - 1);
-      router.back();
-    } catch (e: any) {
-      Alert.alert('Renumber Failed', e.message ?? 'Unknown error');
-    }
-  };
-
   if (loading) {
     return <View style={styles.center}><ActivityIndicator size="large" color={colors.accent} /></View>;
   }
@@ -145,15 +117,15 @@ export default function RecordDetailScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <Stack.Screen options={{ title: record.id }} />
+      <Stack.Screen options={{ title: record.displayId }} />
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         {/* Photo */}
         <Image source={{ uri: record.photoPath }} style={styles.photo} resizeMode="cover" />
 
         {/* Record ID banner */}
         <View style={styles.idBanner}>
-          <Text style={styles.recordId}>{record.id}</Text>
-          <Text style={styles.daId}>{record.daId}</Text>
+          <Text style={styles.recordId}>{record.displayId}</Text>
+          <Text style={styles.daId}>{daName}</Text>
         </View>
 
         <View style={styles.body}>
@@ -273,13 +245,6 @@ export default function RecordDetailScreen() {
               <TouchableOpacity style={styles.deleteBtn} onPress={handleDeletePress}>
                 <Text style={styles.deleteBtnText}>Delete Record</Text>
               </TouchableOpacity>
-
-              <TouchableOpacity style={styles.collapseBtn} onPress={handleCollapsePress}>
-                <Text style={styles.collapseBtnText}>Delete & Collapse Gap</Text>
-                <Text style={styles.collapseHint}>
-                  Deletes this record and renumbers all subsequent structures down by 1 across all DAs.
-                </Text>
-              </TouchableOpacity>
             </>
           )}
         </View>
@@ -289,26 +254,11 @@ export default function RecordDetailScreen() {
       <ConfirmDialog
         visible={showDeleteConfirm}
         title="Delete Record"
-        message={`Delete ${record.id}? This will create a gap in the sequence. Use "Delete & Collapse Gap" to avoid a gap.`}
+        message={`Delete ${record.displayId}? This will permanently remove this record and its photo.`}
         confirmLabel="Delete"
         confirmDanger
         onConfirm={handleConfirmDelete}
         onCancel={() => setShowDeleteConfirm(false)}
-      />
-
-      {/* Collapse confirmation */}
-      <ConfirmDialog
-        visible={showCollapseConfirm}
-        title="Delete & Renumber"
-        message={
-          `This will delete ${record.id} and renumber ${collapsePreview.affectedCount} records ` +
-          `across ${collapsePreview.affectedDAs.length} DA(s): ${collapsePreview.affectedDAs.join(', ')}.\n\n` +
-          `All photo files will be renamed. This cannot be undone.`
-        }
-        confirmLabel="Renumber"
-        confirmDanger
-        onConfirm={handleConfirmCollapse}
-        onCancel={() => setShowCollapseConfirm(false)}
       />
     </SafeAreaView>
   );
@@ -446,16 +396,6 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
   deleteBtnText: { color: colors.danger, fontSize: 16, fontWeight: '700' },
-  collapseBtn: {
-    backgroundColor: colors.warningLight,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    borderWidth: 2,
-    borderColor: colors.warning,
-    marginTop: spacing.xs,
-  },
-  collapseBtnText: { color: colors.warning, fontSize: 15, fontWeight: '700', marginBottom: 3 },
-  collapseHint: { fontSize: 12, color: colors.textSecondary, lineHeight: 16 },
   errorText: { fontSize: 16, color: colors.danger },
   disabled: { opacity: 0.5 },
 });
