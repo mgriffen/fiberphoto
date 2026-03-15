@@ -207,6 +207,8 @@ async function pushRecords(userId: string, errors: string[]): Promise<void> {
         has_sc: record.has_sc === 1,
         has_terminal: record.has_terminal === 1,
         terminal_designation: record.terminal_designation,
+        latitude: record.latitude,
+        longitude: record.longitude,
         notes: record.notes,
         recorded_by: userId,
         created_at: record.created_at,
@@ -224,6 +226,8 @@ async function pushRecords(userId: string, errors: string[]): Promise<void> {
         has_sc: record.has_sc === 1,
         has_terminal: record.has_terminal === 1,
         terminal_designation: record.terminal_designation,
+        latitude: record.latitude,
+        longitude: record.longitude,
         notes: record.notes,
         photo_url: storagePath,
         updated_at: record.updated_at,
@@ -377,9 +381,9 @@ async function pullRecords(): Promise<number> {
         await db.runAsync(
           `INSERT INTO records
             (id, sequence_num, da_id, type_abbrev, structure_type, photo_path, photo_url,
-             has_sc, has_terminal, terminal_designation, notes, recorded_by,
-             created_at, updated_at, sync_status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')`,
+             has_sc, has_terminal, terminal_designation, latitude, longitude,
+             notes, recorded_by, created_at, updated_at, sync_status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')`,
           remote.id,
           remote.sequence_num,
           remote.da_id,
@@ -390,6 +394,8 @@ async function pullRecords(): Promise<number> {
           remote.has_sc ? 1 : 0,
           remote.has_terminal ? 1 : 0,
           remote.terminal_designation,
+          remote.latitude ?? null,
+          remote.longitude ?? null,
           remote.notes,
           remote.recorded_by,
           remote.created_at,
@@ -399,7 +405,8 @@ async function pullRecords(): Promise<number> {
         await db.runAsync(
           `UPDATE records SET
              type_abbrev = ?, structure_type = ?, has_sc = ?, has_terminal = ?,
-             terminal_designation = ?, notes = ?, photo_url = ?,
+             terminal_designation = ?, latitude = ?, longitude = ?,
+             notes = ?, photo_url = ?,
              updated_at = ?, sync_status = 'synced'
            WHERE id = ?`,
           remote.type_abbrev,
@@ -407,6 +414,8 @@ async function pullRecords(): Promise<number> {
           remote.has_sc ? 1 : 0,
           remote.has_terminal ? 1 : 0,
           remote.terminal_designation,
+          remote.latitude ?? null,
+          remote.longitude ?? null,
           remote.notes,
           remote.photo_url,
           remote.updated_at,
@@ -524,6 +533,8 @@ interface RawRecord {
   has_sc: number;
   has_terminal: number;
   terminal_designation: string | null;
+  latitude: number | null;
+  longitude: number | null;
   notes: string | null;
   recorded_by: string;
   created_at: string;

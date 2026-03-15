@@ -53,6 +53,8 @@ export interface FiberRecord {
   hasSC: boolean;               // Splice Enclosure present
   hasTerminal: boolean;         // Indexed Terminal present
   terminalDesignation?: string; // '2.13' — required if hasTerminal
+  latitude?: number;
+  longitude?: number;
   notes?: string;
   recordedBy: string;
   createdAt: string;
@@ -70,6 +72,8 @@ export interface NewRecordPayload {
   hasSC: boolean;
   hasTerminal: boolean;
   terminalDesignation?: string;
+  latitude?: number;
+  longitude?: number;
   notes?: string;
 }
 

@@ -24,7 +24,7 @@ export async function savePhoto(
   const compressed = await ImageManipulator.manipulateAsync(
     tempUri,
     [{ resize: { width: 1920 } }],
-    { compress: 0.78, format: ImageManipulator.SaveFormat.JPEG }
+    { compress: 0.70, format: ImageManipulator.SaveFormat.JPEG }
   );
 
   const filename = buildPhotoFilename(recordId);

@@ -82,9 +82,9 @@ export async function createRecord(
   await db.runAsync(
     `INSERT INTO records
       (id, sequence_num, da_id, type_abbrev, structure_type, photo_path,
-       has_sc, has_terminal, terminal_designation, notes, recorded_by,
-       created_at, updated_at, sync_status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       has_sc, has_terminal, terminal_designation, latitude, longitude,
+       notes, recorded_by, created_at, updated_at, sync_status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     seqNum,
     payload.daId,
@@ -94,6 +94,8 @@ export async function createRecord(
     payload.hasSC ? 1 : 0,
     payload.hasTerminal ? 1 : 0,
     payload.terminalDesignation ?? null,
+    payload.latitude ?? null,
+    payload.longitude ?? null,
     payload.notes ?? null,
     recordedBy,
     now,
@@ -114,6 +116,8 @@ export async function createRecord(
     hasSC: payload.hasSC,
     hasTerminal: payload.hasTerminal,
     terminalDesignation: payload.terminalDesignation,
+    latitude: payload.latitude,
+    longitude: payload.longitude,
     notes: payload.notes,
     recordedBy,
     createdAt: now,
@@ -216,6 +220,8 @@ interface RawRecord {
   has_sc: number;
   has_terminal: number;
   terminal_designation: string | null;
+  latitude: number | null;
+  longitude: number | null;
   notes: string | null;
   recorded_by: string;
   created_at: string;
@@ -236,6 +242,8 @@ function rowToRecord(row: RawRecord): FiberRecord {
     hasSC: row.has_sc === 1,
     hasTerminal: row.has_terminal === 1,
     terminalDesignation: row.terminal_designation ?? undefined,
+    latitude: row.latitude ?? undefined,
+    longitude: row.longitude ?? undefined,
     notes: row.notes ?? undefined,
     recordedBy: row.recorded_by,
     createdAt: row.created_at,

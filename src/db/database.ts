@@ -34,6 +34,8 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       has_sc               INTEGER NOT NULL DEFAULT 0,
       has_terminal         INTEGER NOT NULL DEFAULT 0,
       terminal_designation TEXT,
+      latitude             REAL,
+      longitude            REAL,
       notes                TEXT,
       recorded_by          TEXT NOT NULL,
       created_at           TEXT NOT NULL,
@@ -86,5 +88,12 @@ async function migrateSchema(db: SQLite.SQLiteDatabase): Promise<void> {
 
   if (!recsColumns.includes('sync_status')) {
     await db.execAsync(`ALTER TABLE records ADD COLUMN sync_status TEXT NOT NULL DEFAULT 'pending'`);
+  }
+
+  if (!recsColumns.includes('latitude')) {
+    await db.execAsync(`ALTER TABLE records ADD COLUMN latitude REAL`);
+  }
+  if (!recsColumns.includes('longitude')) {
+    await db.execAsync(`ALTER TABLE records ADD COLUMN longitude REAL`);
   }
 }

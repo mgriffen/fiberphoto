@@ -12,6 +12,7 @@ import { setSetting, getRecordsByDA, searchRecordsByDesignation } from '@/db/rec
 import type { FiberRecord } from '@/types';
 import { RecordCard } from '@/components/RecordCard';
 import { colors, spacing, radius } from '@/components/theme';
+import { ScreenBackground, BG_COLOR } from '@/components/ScreenBackground';
 import { useFocusEffect } from 'expo-router';
 
 const DA_NAMES = Array.from({ length: 15 }, (_, i) =>
@@ -93,6 +94,8 @@ export default function WelcomeScreen() {
   };
 
   return (
+    <View style={styles.container}>
+      <ScreenBackground />
     <SafeAreaView style={styles.safe}>
       {/* Top bar */}
       <View style={styles.topBar}>
@@ -183,11 +186,11 @@ export default function WelcomeScreen() {
                 onPress={() => handleDAPress(name)}
                 activeOpacity={0.7}
               >
-                <Text style={styles.daBtnNumber}>
-                  {name.replace('DA', '')}
-                </Text>
                 <Text style={styles.daBtnLabel}>
                   DA
+                </Text>
+                <Text style={styles.daBtnNumber}>
+                  {name.replace('DA', '')}
                 </Text>
                 {hasRecords && (
                   <Text style={styles.countText}>{count} {count === 1 ? 'Record' : 'Records'}</Text>
@@ -253,13 +256,17 @@ export default function WelcomeScreen() {
         </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: BG_COLOR,
+  },
   safe: {
     flex: 1,
-    backgroundColor: colors.primary,
   },
 
   // ─── Top Bar ──────────────────────────────────────────
@@ -328,9 +335,6 @@ const styles = StyleSheet.create({
   // ─── Grid ─────────────────────────────────────────────
   gridContainer: {
     flex: 1,
-    backgroundColor: colors.bg,
-    borderTopLeftRadius: radius.lg + 4,
-    borderTopRightRadius: radius.lg + 4,
     paddingHorizontal: spacing.sm + 2,
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
@@ -343,9 +347,9 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: 'rgba(255,255,255,0.92)',
     borderWidth: 1.5,
-    borderColor: colors.border,
+    borderColor: 'rgba(147,180,240,0.6)',
     borderRadius: radius.md,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
@@ -357,7 +361,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
   },
   searchClearText: {
-    color: colors.textSecondary,
+    color: 'rgba(255,255,255,0.6)',
     fontSize: 13,
     fontWeight: '600',
   },
@@ -367,7 +371,7 @@ const styles = StyleSheet.create({
   searchResultDA: {
     fontSize: 11,
     fontWeight: '700',
-    color: colors.textSecondary,
+    color: 'rgba(255,255,255,0.6)',
     letterSpacing: 0.8,
     textTransform: 'uppercase',
     marginLeft: spacing.md,
@@ -380,13 +384,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   searchEmptyText: {
-    color: colors.textSecondary,
+    color: 'rgba(255,255,255,0.6)',
     fontSize: 14,
   },
   gridTitle: {
     fontSize: 11,
     fontWeight: '700',
-    color: colors.textSecondary,
+    color: 'rgba(255,255,255,0.5)',
     letterSpacing: 1,
     textTransform: 'uppercase',
     textAlign: 'center',
@@ -404,18 +408,12 @@ const styles = StyleSheet.create({
     flexBasis: '30%',
     maxWidth: '33%',
     height: `${(100 / GRID_ROWS) - 1.5}%` as any,
-    backgroundColor: '#ffffff',
+    backgroundColor: 'rgba(255,255,255,0.88)',
     borderRadius: radius.md + 2,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1.5,
-    borderColor: colors.border,
-    // Subtle elevation
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 3,
-    elevation: 2,
+    borderColor: 'rgba(255,255,255,0.3)',
   },
   daBtnNumber: {
     fontSize: 28,
@@ -426,13 +424,14 @@ const styles = StyleSheet.create({
     lineHeight: 32,
   },
   daBtnLabel: {
-    fontSize: 14,
+    fontSize: 28,
     fontWeight: '900',
-    color: colors.textSecondary,
+    color: colors.accent,
     letterSpacing: 3,
     textTransform: 'uppercase',
-    marginTop: -1,
+    marginBottom: -6,
     fontFamily: 'Courier New',
+    lineHeight: 32,
   },
   countText: {
     fontSize: 9,

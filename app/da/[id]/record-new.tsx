@@ -14,6 +14,7 @@ import { isValidTerminalDesignation } from '@/utils/validators';
 import { StructureTypePicker } from '@/components/StructureTypePicker';
 import { useAppContext } from '@/context/AppContext';
 import { colors, spacing, radius } from '@/components/theme';
+import { ScreenBackground, BG_COLOR } from '@/components/ScreenBackground';
 import { StructureTypeId } from '@/types';
 
 export default function RecordNewScreen() {
@@ -91,6 +92,8 @@ export default function RecordNewScreen() {
   };
 
   return (
+    <View style={styles.container}>
+      <ScreenBackground />
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         {/* Photo preview */}
@@ -188,11 +191,13 @@ export default function RecordNewScreen() {
         </View>
       </ScrollView>
     </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1, backgroundColor: BG_COLOR },
+  safe: { flex: 1 },
   flex: { flex: 1 },
   scroll: { paddingBottom: spacing.xl },
   photo: {
@@ -206,7 +211,7 @@ const styles = StyleSheet.create({
     padding: spacing.sm,
   },
   retakeText: {
-    color: colors.accent,
+    color: 'rgba(255,255,255,0.7)',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -217,15 +222,15 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 12,
     fontWeight: '700',
-    color: colors.textSecondary,
+    color: 'rgba(255,255,255,0.6)',
     letterSpacing: 0.8,
     textTransform: 'uppercase',
     marginBottom: 2,
   },
   input: {
-    backgroundColor: colors.surface,
+    backgroundColor: 'rgba(255,255,255,0.92)',
     borderWidth: 2,
-    borderColor: colors.border,
+    borderColor: 'rgba(255,255,255,0.3)',
     borderRadius: radius.md,
     padding: spacing.md,
     fontSize: 16,
@@ -238,12 +243,12 @@ const styles = StyleSheet.create({
   toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: 'rgba(255,255,255,0.92)',
     borderRadius: radius.md,
     padding: spacing.md,
     justifyContent: 'space-between',
     borderWidth: 2,
-    borderColor: colors.border,
+    borderColor: 'rgba(255,255,255,0.3)',
   },
   toggleInfo: { flex: 1 },
   toggleLabel: {
@@ -262,7 +267,7 @@ const styles = StyleSheet.create({
   },
   divider: {
     height: 1,
-    backgroundColor: colors.border,
+    backgroundColor: 'rgba(255,255,255,0.15)',
     marginVertical: spacing.xs,
   },
   saveBtn: {

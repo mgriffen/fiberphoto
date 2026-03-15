@@ -1,12 +1,20 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ScrollView, Image, Alert, Switch, ActivityIndicator,
-  KeyboardAvoidingView, Platform
+  KeyboardAvoidingView, Platform, Linking, Animated, Dimensions,
+  Modal, StatusBar,
 } from 'react-native';
+import { WebView } from 'react-native-webview';
+import { ReactNativeZoomableView } from '@openspacelabs/react-native-zoomable-view';
+import {
+  GestureHandlerRootView,
+  PanGestureHandler,
+  State,
+} from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
-import { getRecordById, updateRecord, deleteRecord } from '@/db/recordRepository';
+import { getRecordById, updateRecord, deleteRecord, getRecordsByDA } from '@/db/recordRepository';
 import { getDAByName } from '@/db/daRepository';
 import { deletePhoto } from '@/services/photoService';
 import { isValidTerminalDesignation } from '@/utils/validators';
@@ -14,11 +22,14 @@ import { StructureTypePicker } from '@/components/StructureTypePicker';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { FiberRecord, StructureTypeId } from '@/types';
 import { colors, spacing, radius } from '@/components/theme';
+import { ScreenBackground, BG_COLOR } from '@/components/ScreenBackground';
 
 export default function RecordDetailScreen() {
   const { id: daId, recordId } = useLocalSearchParams<{ id: string; recordId: string }>();
   const router = useRouter();
 
+  // activeId tracks which record is displayed — starts from URL, changes on swipe
+  const [activeId, setActiveId] = useState(recordId);
   const [record, setRecord] = useState<FiberRecord | null>(null);
   const [daName, setDaName] = useState('');
   const [loading, setLoading] = useState(true);
@@ -35,13 +46,25 @@ export default function RecordDetailScreen() {
 
   // Dialog state
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showZoom, setShowZoom] = useState(false);
 
-  useEffect(() => { loadRecord(); }, [recordId, daId]);
+  // Swipe navigation state
+  const [siblingIds, setSiblingIds] = useState<string[]>([]);
+  const translateX = useRef(new Animated.Value(0)).current;
+  const screenWidth = Dimensions.get('window').width;
+  const scrollRef = useRef<ScrollView>(null);
+  const swipingRef = useRef(false);
 
-  async function loadRecord() {
-    setLoading(true);
+  // Sync activeId when URL param changes (e.g. navigating from search)
+  useEffect(() => { setActiveId(recordId); }, [recordId]);
+
+  // Load record data when activeId changes
+  useEffect(() => { loadRecord(activeId); }, [activeId, daId]);
+
+  async function loadRecord(id: string, showSpinner = true) {
+    if (showSpinner) setLoading(true);
     const [r, da] = await Promise.all([
-      getRecordById(recordId),
+      getRecordById(id),
       getDAByName(daId),
     ]);
     if (r) {
@@ -50,6 +73,8 @@ export default function RecordDetailScreen() {
     }
     if (da) {
       setDaName(da.name);
+      const siblings = await getRecordsByDA(da.id);
+      setSiblingIds(siblings.map(s => s.id));
     }
     setLoading(false);
   }
@@ -74,7 +99,7 @@ export default function RecordDetailScreen() {
     }
     setSaving(true);
     try {
-      await updateRecord(recordId, {
+      await updateRecord(activeId, {
         structureType,
         typeAbbrev,
         hasSC,
@@ -82,7 +107,7 @@ export default function RecordDetailScreen() {
         terminalDesignation: hasTerminal ? terminalDes.trim() : undefined,
         notes: notes.trim() || undefined,
       });
-      await loadRecord();
+      await loadRecord(activeId, false);
       setEditing(false);
     } catch (e: any) {
       Alert.alert('Save Failed', e.message ?? 'Unknown error');
@@ -107,6 +132,63 @@ export default function RecordDetailScreen() {
     }
   };
 
+  const navigateToSibling = useCallback(async (nextId: string, direction: 'left' | 'right') => {
+    if (swipingRef.current) return;
+    swipingRef.current = true;
+
+    // Preload next record before animating
+    const nextRecord = await getRecordById(nextId);
+    if (!nextRecord) { swipingRef.current = false; return; }
+
+    const exitValue = direction === 'left' ? -screenWidth : screenWidth;
+    const enterValue = direction === 'left' ? screenWidth : -screenWidth;
+
+    // Animate current content off-screen
+    Animated.timing(translateX, {
+      toValue: exitValue,
+      duration: 150,
+      useNativeDriver: true,
+    }).start(() => {
+      // Swap data while off-screen
+      setRecord(nextRecord);
+      populateEdit(nextRecord);
+      setActiveId(nextId);
+      scrollRef.current?.scrollTo({ y: 0, animated: false });
+
+      // Position on opposite side, then animate in
+      translateX.setValue(enterValue);
+      Animated.timing(translateX, {
+        toValue: 0,
+        duration: 150,
+        useNativeDriver: true,
+      }).start(() => {
+        swipingRef.current = false;
+      });
+    });
+  }, [screenWidth, translateX]);
+
+  const handleSwipe = useCallback(({ nativeEvent }: any) => {
+    if (nativeEvent.state === State.END && !editing) {
+      const { translationX: tx, velocityX } = nativeEvent;
+      const currentIdx = siblingIds.indexOf(activeId);
+      if (currentIdx < 0) {
+        Animated.spring(translateX, { toValue: 0, useNativeDriver: true }).start();
+        return;
+      }
+
+      if ((tx < -50 || velocityX < -500) && currentIdx < siblingIds.length - 1) {
+        navigateToSibling(siblingIds[currentIdx + 1], 'left');
+      } else if ((tx > 50 || velocityX > 500) && currentIdx > 0) {
+        navigateToSibling(siblingIds[currentIdx - 1], 'right');
+      } else {
+        Animated.spring(translateX, {
+          toValue: 0,
+          useNativeDriver: true,
+        }).start();
+      }
+    }
+  }, [editing, siblingIds, activeId, navigateToSibling, translateX]);
+
   if (loading) {
     return <View style={styles.center}><ActivityIndicator size="large" color={colors.accent} /></View>;
   }
@@ -115,12 +197,32 @@ export default function RecordDetailScreen() {
     return <View style={styles.center}><Text style={styles.errorText}>Record not found.</Text></View>;
   }
 
+  const currentIdx = siblingIds.indexOf(activeId);
+
   return (
+    <View style={styles.outerContainer}>
+    <ScreenBackground />
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <SafeAreaView style={styles.safe}>
       <Stack.Screen options={{ title: record.displayId }} />
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        {/* Photo */}
-        <Image source={{ uri: record.photoPath }} style={styles.photo} resizeMode="cover" />
+      <PanGestureHandler
+        onHandlerStateChange={handleSwipe}
+        onGestureEvent={Animated.event(
+          [{ nativeEvent: { translationX: translateX } }],
+          { useNativeDriver: true }
+        )}
+        activeOffsetX={[-20, 20]}
+        failOffsetY={[-20, 20]}
+      >
+      <Animated.View style={{ flex: 1, transform: [{ translateX }] }}>
+      <ScrollView ref={scrollRef} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+        {/* Photo — tap to zoom */}
+        <TouchableOpacity activeOpacity={0.9} onPress={() => setShowZoom(true)}>
+          <Image source={{ uri: record.photoPath }} style={styles.photo} resizeMode="cover" />
+          <View style={styles.zoomHint}>
+            <Text style={styles.zoomHintText}>Tap to zoom</Text>
+          </View>
+        </TouchableOpacity>
 
         {/* Record ID banner */}
         <View style={styles.idBanner}>
@@ -236,6 +338,29 @@ export default function RecordDetailScreen() {
                 />
               )}
 
+              {record.latitude != null && record.longitude != null && (
+                <View style={styles.mapContainer}>
+                  <WebView
+                    style={styles.mapWebView}
+                    originWhitelist={['*']}
+                    scrollEnabled={false}
+                    source={{ html: `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><style>html,body,#map{margin:0;padding:0;width:100%;height:100%}</style></head><body><div id="map"></div><script>var map=L.map('map',{zoomControl:false,attributionControl:false,dragging:false,scrollWheelZoom:false,doubleClickZoom:false,touchZoom:false}).setView([${record.latitude},${record.longitude}],17);L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);L.marker([${record.latitude},${record.longitude}]).addTo(map);</script></body></html>` }}
+                  />
+                  <TouchableOpacity
+                    style={styles.mapOverlay}
+                    onPress={() => {
+                      const url = Platform.select({
+                        ios: `maps:0,0?q=${record.latitude},${record.longitude}`,
+                        android: `geo:0,0?q=${record.latitude},${record.longitude}`,
+                      });
+                      if (url) Linking.openURL(url);
+                    }}
+                  >
+                    <Text style={styles.mapLabel}>Open in Maps</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
               <View style={styles.divider} />
 
               <TouchableOpacity style={styles.editBtn} onPress={() => setEditing(true)}>
@@ -249,6 +374,41 @@ export default function RecordDetailScreen() {
           )}
         </View>
       </ScrollView>
+      </Animated.View>
+      </PanGestureHandler>
+
+      {/* Swipe indicator */}
+      {siblingIds.length > 1 && currentIdx >= 0 && (
+        <View style={styles.swipeIndicator}>
+          <Text style={styles.swipeText}>
+            {currentIdx + 1} / {siblingIds.length}
+          </Text>
+        </View>
+      )}
+
+      {/* Fullscreen zoomable photo */}
+      <Modal visible={showZoom} transparent animationType="fade" onRequestClose={() => setShowZoom(false)}>
+        <StatusBar hidden={showZoom} />
+        <View style={styles.zoomModal}>
+          <ReactNativeZoomableView
+            maxZoom={5}
+            minZoom={1}
+            initialZoom={1}
+            bindToBorders
+            contentWidth={screenWidth}
+            contentHeight={screenWidth * 1.5}
+          >
+            <Image
+              source={{ uri: record.photoPath }}
+              style={{ width: screenWidth, height: screenWidth * 1.5 }}
+              resizeMode="contain"
+            />
+          </ReactNativeZoomableView>
+          <TouchableOpacity style={styles.zoomClose} onPress={() => setShowZoom(false)}>
+            <Text style={styles.zoomCloseText}>Close</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
 
       {/* Delete confirmation */}
       <ConfirmDialog
@@ -261,6 +421,8 @@ export default function RecordDetailScreen() {
         onCancel={() => setShowDeleteConfirm(false)}
       />
     </SafeAreaView>
+    </GestureHandlerRootView>
+    </View>
   );
 }
 
@@ -277,24 +439,25 @@ const fieldStyles = StyleSheet.create({
   row: {
     paddingVertical: spacing.sm + 2,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: 'rgba(255,255,255,0.12)',
   },
   label: {
     fontSize: 11,
     fontWeight: '700',
-    color: colors.textSecondary,
+    color: 'rgba(255,255,255,0.5)',
     letterSpacing: 0.8,
     textTransform: 'uppercase',
     marginBottom: 2,
   },
   value: {
     fontSize: 15,
-    color: colors.text,
+    color: '#fff',
   },
 });
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
+  outerContainer: { flex: 1, backgroundColor: BG_COLOR },
+  safe: { flex: 1 },
   flex: { flex: 1 },
   scroll: { paddingBottom: spacing.xl },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
@@ -329,14 +492,14 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 12,
     fontWeight: '700',
-    color: colors.textSecondary,
+    color: 'rgba(255,255,255,0.6)',
     letterSpacing: 0.8,
     textTransform: 'uppercase',
   },
   input: {
-    backgroundColor: colors.surface,
+    backgroundColor: 'rgba(255,255,255,0.92)',
     borderWidth: 2,
-    borderColor: colors.border,
+    borderColor: 'rgba(255,255,255,0.3)',
     borderRadius: radius.md,
     padding: spacing.md,
     fontSize: 16,
@@ -346,17 +509,17 @@ const styles = StyleSheet.create({
   toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: 'rgba(255,255,255,0.92)',
     borderRadius: radius.md,
     padding: spacing.md,
     justifyContent: 'space-between',
     borderWidth: 2,
-    borderColor: colors.border,
+    borderColor: 'rgba(255,255,255,0.3)',
   },
   toggleInfo: { flex: 1 },
   toggleLabel: { fontSize: 15, fontWeight: '700', color: colors.text },
   indented: { marginLeft: spacing.md, gap: spacing.xs },
-  divider: { height: 1, backgroundColor: colors.border, marginVertical: spacing.xs },
+  divider: { height: 1, backgroundColor: 'rgba(255,255,255,0.15)', marginVertical: spacing.xs },
   editActions: {
     flexDirection: 'row',
     gap: spacing.sm,
@@ -367,10 +530,11 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     borderRadius: radius.md,
     borderWidth: 2,
-    borderColor: colors.border,
+    borderColor: 'rgba(255,255,255,0.3)',
+    backgroundColor: 'rgba(255,255,255,0.15)',
     alignItems: 'center',
   },
-  cancelEditText: { fontSize: 15, fontWeight: '600', color: colors.textSecondary },
+  cancelEditText: { fontSize: 15, fontWeight: '600', color: 'rgba(255,255,255,0.7)' },
   editBtn: {
     backgroundColor: colors.accent,
     borderRadius: radius.md,
@@ -387,15 +551,87 @@ const styles = StyleSheet.create({
   },
   saveBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
   deleteBtn: {
-    backgroundColor: colors.dangerLight,
+    backgroundColor: 'rgba(254,226,226,0.92)',
     borderRadius: radius.md,
     padding: spacing.md + 2,
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: colors.danger,
+    borderColor: 'rgba(239,68,68,0.7)',
     marginTop: spacing.xs,
   },
   deleteBtnText: { color: colors.danger, fontSize: 16, fontWeight: '700' },
-  errorText: { fontSize: 16, color: colors.danger },
+  errorText: { fontSize: 16, color: '#fff' },
   disabled: { opacity: 0.5 },
+  swipeIndicator: {
+    position: 'absolute',
+    bottom: spacing.md,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 12,
+    paddingHorizontal: spacing.sm + 4,
+    paddingVertical: spacing.xs + 1,
+  },
+  swipeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  zoomHint: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  zoomHintText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  zoomModal: {
+    flex: 1,
+    backgroundColor: '#000',
+    justifyContent: 'center',
+  },
+  zoomClose: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  zoomCloseText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  mapContainer: {
+    borderRadius: radius.md,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginTop: spacing.sm,
+    height: 200,
+  },
+  mapWebView: {
+    flex: 1,
+  },
+  mapOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    paddingVertical: spacing.xs + 2,
+    alignItems: 'center',
+  },
+  mapLabel: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
 });

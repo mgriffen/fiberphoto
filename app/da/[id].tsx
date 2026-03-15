@@ -14,6 +14,7 @@ import { RecordCard } from '@/components/RecordCard';
 import { useSyncContext } from '@/context/SyncContext';
 import { DA, FiberRecord } from '@/types';
 import { colors, spacing, radius } from '@/components/theme';
+import { ScreenBackground, BG_COLOR } from '@/components/ScreenBackground';
 
 export default function DADetailScreen() {
   const { id: daName } = useLocalSearchParams<{ id: string }>();
@@ -135,141 +136,134 @@ export default function DADetailScreen() {
   // DA may not exist yet (no records created) — show empty state with the name
   const displayName = da?.name ?? daName;
 
+  // Detect gaps in sequence numbers within this DA
+  const gaps: number[] = [];
+  if (records.length >= 2) {
+    const seqNums = records.map(r => r.sequenceNum).sort((a, b) => a - b);
+    for (let i = 1; i < seqNums.length; i++) {
+      for (let n = seqNums[i - 1] + 1; n < seqNums[i]; n++) {
+        gaps.push(n);
+      }
+    }
+  }
+
   return (
-    <SafeAreaView style={styles.safe}>
+    <View style={styles.container}>
       <Stack.Screen options={{ title: displayName }} />
-      <FlatList
-        data={records}
-        keyExtractor={item => item.id}
-        renderItem={renderItem}
-        ListHeaderComponent={
-          <>
-            {/* DA header */}
-            <View style={styles.daHeader}>
-              <Text style={styles.daId}>{displayName}</Text>
-              <View style={styles.statsRow}>
-                <View style={styles.statBubble}>
-                  <Text style={styles.statNum}>{records.length}</Text>
-                  <Text style={styles.statLabel}>
-                    structure{records.length !== 1 ? 's' : ''}
+
+      <ScreenBackground />
+
+      {/* Scrollable content on top */}
+      <SafeAreaView style={styles.safe}>
+        <FlatList
+          data={records}
+          keyExtractor={item => item.id}
+          renderItem={renderItem}
+          ListHeaderComponent={
+            <>
+              {/* DA title — transparent, text over background */}
+              <View style={styles.daHeader}>
+                <Text style={styles.daId}>{displayName}</Text>
+                <Text style={styles.structureCount}>
+                  {records.length} structure{records.length !== 1 ? 's' : ''}
+                </Text>
+              </View>
+
+              {/* Gap warning */}
+              {gaps.length > 0 && (
+                <View style={styles.gapWarning}>
+                  <Text style={styles.gapWarningText}>
+                    <Text style={styles.gapWarningBold}>
+                      {gaps.length} missing{' '}
+                    </Text>
+                    #{gaps.length <= 10 ? gaps.join(', #') : gaps.slice(0, 10).join(', #') + ` +${gaps.length - 10} more`}
                   </Text>
                 </View>
-                {records.length > 0 && (
-                  <>
-                    <View style={styles.statBubble}>
-                      <Text style={styles.statNum}>
-                        {records.filter(r => r.typeAbbrev === 'HH').length}
-                      </Text>
-                      <Text style={styles.statLabel}>HH</Text>
-                    </View>
-                    <View style={styles.statBubble}>
-                      <Text style={styles.statNum}>
-                        {records.filter(r => r.typeAbbrev === 'FP').length}
-                      </Text>
-                      <Text style={styles.statLabel}>FP</Text>
-                    </View>
-                    <View style={styles.statBubble}>
-                      <Text style={styles.statNum}>
-                        {records.filter(r => r.typeAbbrev === 'BP').length}
-                      </Text>
-                      <Text style={styles.statLabel}>BP</Text>
-                    </View>
-                  </>
-                )}
+              )}
+
+              {/* Action buttons */}
+              <View style={styles.actions}>
+                <TouchableOpacity style={styles.newBtn} onPress={handleNewRecord}>
+                  <Text style={styles.newBtnText}>+ New Record</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.exportBtn, (exporting || records.length === 0) && styles.disabled]}
+                  onPress={handleExport}
+                  disabled={exporting || records.length === 0}
+                >
+                  <Text style={styles.exportBtnText}>
+                    {exporting ? 'Exporting…' : 'Export ZIP'}
+                  </Text>
+                </TouchableOpacity>
               </View>
-            </View>
 
-            {/* Action buttons */}
-            <View style={styles.actions}>
-              <TouchableOpacity style={styles.newBtn} onPress={handleNewRecord}>
-                <Text style={styles.newBtnText}>+ New Record</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.exportBtn, (exporting || records.length === 0) && styles.disabled]}
-                onPress={handleExport}
-                disabled={exporting || records.length === 0}
-              >
-                <Text style={styles.exportBtnText}>
-                  {exporting ? 'Exporting…' : 'Export ZIP'}
-                </Text>
-              </TouchableOpacity>
+              {records.length > 0 && (
+                <Text style={styles.listLabel}>Records</Text>
+              )}
+            </>
+          }
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <Text style={styles.emptyIcon}>📷</Text>
+              <Text style={styles.emptyText}>No structures recorded</Text>
+              <Text style={styles.emptyHint}>Tap "+ New Record" to photograph your first structure</Text>
             </View>
-
-            {records.length > 0 && (
-              <Text style={styles.listLabel}>Records</Text>
-            )}
-          </>
-        }
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyIcon}>📷</Text>
-            <Text style={styles.emptyText}>No structures recorded</Text>
-            <Text style={styles.emptyHint}>Tap "+ New Record" to photograph your first structure</Text>
-          </View>
-        }
-        ListFooterComponent={da ? (
-          <TouchableOpacity style={styles.deleteDABtn} onPress={handleDeleteDA}>
-            <Text style={styles.deleteDAText}>Delete {da.name}</Text>
-          </TouchableOpacity>
-        ) : null}
-        contentContainerStyle={{ paddingBottom: spacing.xl }}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            tintColor={colors.accent}
-            colors={[colors.accent]}
-          />
-        }
-      />
-    </SafeAreaView>
+          }
+          ListFooterComponent={da ? (
+            <TouchableOpacity style={styles.deleteDABtn} onPress={handleDeleteDA}>
+              <Text style={styles.deleteDAText}>Delete {da.name}</Text>
+            </TouchableOpacity>
+          ) : null}
+          contentContainerStyle={{ paddingBottom: spacing.xl }}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor="#fff"
+              colors={['#fff']}
+            />
+          }
+        />
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1, backgroundColor: BG_COLOR },
+  safe: { flex: 1 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+
+  // ─── Header (transparent, over background) ──────────────
   daHeader: {
-    backgroundColor: colors.primary,
-    padding: spacing.lg,
-    paddingBottom: spacing.md,
+    alignItems: 'center',
+    paddingVertical: spacing.lg + spacing.md,
+    paddingHorizontal: spacing.md,
   },
   daId: {
-    fontSize: 34,
+    fontSize: 38,
     fontWeight: '900',
     color: '#fff',
     fontFamily: 'Courier New',
-    letterSpacing: 2,
+    letterSpacing: 3,
+    textShadowColor: 'rgba(0,0,0,0.6)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 6,
   },
-  statsRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.sm,
-  },
-  statBubble: {
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderRadius: radius.sm + 2,
-    paddingHorizontal: spacing.sm + 4,
-    paddingVertical: spacing.xs + 2,
-    alignItems: 'center',
-    minWidth: 48,
-  },
-  statNum: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#fff',
-  },
-  statLabel: {
-    fontSize: 10,
-    color: 'rgba(255,255,255,0.6)',
+  structureCount: {
+    fontSize: 14,
     fontWeight: '600',
+    color: 'rgba(255,255,255,0.75)',
+    marginTop: 4,
     letterSpacing: 0.5,
-    textTransform: 'uppercase',
   },
+
+  // ─── Actions (opaque cards) ─────────────────────────────
   actions: {
     flexDirection: 'row',
     gap: spacing.sm,
-    padding: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
   },
   newBtn: {
     flex: 2,
@@ -285,9 +279,7 @@ const styles = StyleSheet.create({
   },
   exportBtn: {
     flex: 1,
-    backgroundColor: colors.surface,
-    borderWidth: 2,
-    borderColor: colors.border,
+    backgroundColor: 'rgba(255,255,255,0.92)',
     borderRadius: radius.md,
     padding: spacing.md + 2,
     alignItems: 'center',
@@ -297,10 +289,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+
+  // ─── List ───────────────────────────────────────────────
   listLabel: {
     fontSize: 12,
     fontWeight: '700',
-    color: colors.textSecondary,
+    color: 'rgba(255,255,255,0.6)',
     letterSpacing: 0.8,
     textTransform: 'uppercase',
     marginLeft: spacing.md,
@@ -319,16 +313,37 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.textSecondary,
+    color: 'rgba(255,255,255,0.7)',
   },
   emptyHint: {
     fontSize: 14,
-    color: colors.textSecondary,
+    color: 'rgba(255,255,255,0.5)',
     marginTop: spacing.xs,
     textAlign: 'center',
     lineHeight: 20,
   },
   disabled: { opacity: 0.5 },
+
+  // ─── Gap Warning ────────────────────────────────────────
+  gapWarning: {
+    backgroundColor: 'rgba(255, 237, 213, 0.95)',
+    borderWidth: 1.5,
+    borderColor: colors.warning,
+    borderRadius: radius.md,
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.sm + 4,
+    paddingVertical: spacing.xs + 3,
+  },
+  gapWarningText: {
+    fontSize: 12,
+    color: colors.warning,
+  },
+  gapWarningBold: {
+    fontWeight: '700',
+  },
+
+  // ─── Footer ─────────────────────────────────────────────
   errorText: { fontSize: 16, color: colors.danger },
   deleteDABtn: {
     marginHorizontal: spacing.md,
@@ -336,8 +351,8 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     borderRadius: radius.md,
     borderWidth: 2,
-    borderColor: colors.danger,
-    backgroundColor: colors.dangerLight,
+    borderColor: 'rgba(239,68,68,0.7)',
+    backgroundColor: 'rgba(254,226,226,0.92)',
     alignItems: 'center',
   },
   deleteDAText: {
