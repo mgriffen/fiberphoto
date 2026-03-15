@@ -7,7 +7,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { getRecordById, updateRecord, deleteRecord } from '@/db/recordRepository';
-import { getDAById } from '@/db/daRepository';
+import { getDAByName } from '@/db/daRepository';
 import { deletePhoto } from '@/services/photoService';
 import { isValidTerminalDesignation } from '@/utils/validators';
 import { StructureTypePicker } from '@/components/StructureTypePicker';
@@ -36,13 +36,13 @@ export default function RecordDetailScreen() {
   // Dialog state
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  useEffect(() => { loadRecord(); }, [recordId]);
+  useEffect(() => { loadRecord(); }, [recordId, daId]);
 
   async function loadRecord() {
     setLoading(true);
     const [r, da] = await Promise.all([
       getRecordById(recordId),
-      getDAById(daId),
+      getDAByName(daId),
     ]);
     if (r) {
       setRecord(r);

@@ -7,6 +7,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { createRecord } from '@/db/recordRepository';
+import { getOrCreateDA } from '@/db/daRepository';
 import { savePhoto } from '@/services/photoService';
 import { generateUUID } from '@/utils/idGenerator';
 import { isValidTerminalDesignation } from '@/utils/validators';
@@ -16,7 +17,7 @@ import { colors, spacing, radius } from '@/components/theme';
 import { StructureTypeId } from '@/types';
 
 export default function RecordNewScreen() {
-  const { id: daId, tempUri } = useLocalSearchParams<{ id: string; tempUri: string }>();
+  const { id: daName, tempUri } = useLocalSearchParams<{ id: string; tempUri: string }>();
   const router = useRouter();
   const { userName } = useAppContext();
 
@@ -27,6 +28,19 @@ export default function RecordNewScreen() {
   const [terminalDes, setTerminalDes] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+
+  if (!daName || !tempUri) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <Text style={{ color: colors.danger, fontSize: 16 }}>Error: Missing photo or DA info.</Text>
+          <TouchableOpacity style={styles.retakeBtn} onPress={() => router.back()}>
+            <Text style={styles.retakeText}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   const handleSave = async () => {
     if (!structureType) {
@@ -40,13 +54,17 @@ export default function RecordNewScreen() {
 
     setSaving(true);
     try {
+      // Resolve DA name to UUID (creates DA if first record)
+      const da = await getOrCreateDA(daName);
+
       // Generate UUID for this record before saving photo
       const recordId = generateUUID();
       const photoPath = await savePhoto(tempUri, recordId);
 
       await createRecord(
         {
-          daId,
+          daId: da.id,
+          daName: da.name,
           structureType,
           typeAbbrev,
           photoPath,
@@ -59,8 +77,9 @@ export default function RecordNewScreen() {
         recordId
       );
 
-      // Navigate back to DA detail (replaces stack so we don't land on home)
-      router.replace(`/da/${daId}`);
+      // Navigate back to DA detail (camera replaced itself with this screen, so back() returns to DA)
+      setSaving(false);
+      router.back();
     } catch (e: any) {
       Alert.alert('Save Failed', e.message ?? 'Unknown error');
       setSaving(false);

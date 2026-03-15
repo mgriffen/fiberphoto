@@ -8,7 +8,7 @@ import { touchDA } from './daRepository';
 export async function getRecordsByDA(daId: string): Promise<FiberRecord[]> {
   const db = await getDatabase();
   const rows = await db.getAllAsync<RawRecord>(
-    'SELECT * FROM records WHERE da_id = ? ORDER BY sequence_num ASC',
+    "SELECT * FROM records WHERE da_id = ? AND sync_status != 'deleted' ORDER BY sequence_num ASC",
     daId
   );
   return rows.map(rowToRecord);
@@ -23,10 +23,25 @@ export async function getRecordById(id: string): Promise<FiberRecord | null> {
   return row ? rowToRecord(row) : null;
 }
 
+export async function searchRecordsByDesignation(query: string): Promise<(FiberRecord & { daName: string })[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<RawRecord & { da_name: string }>(
+    `SELECT r.*, d.name as da_name FROM records r
+     JOIN das d ON r.da_id = d.id
+     WHERE r.sync_status != 'deleted'
+       AND ((r.type_abbrev || r.sequence_num) LIKE ?
+        OR r.terminal_designation LIKE ?)
+     ORDER BY r.sequence_num ASC
+     LIMIT 20`,
+    `%${query}%`, `%${query}%`
+  );
+  return rows.map(row => ({ ...rowToRecord(row), daName: row.da_name }));
+}
+
 export async function getAllRecords(): Promise<FiberRecord[]> {
   const db = await getDatabase();
   const rows = await db.getAllAsync<RawRecord>(
-    'SELECT * FROM records ORDER BY sequence_num ASC'
+    "SELECT * FROM records WHERE sync_status != 'deleted' ORDER BY sequence_num ASC"
   );
   return rows.map(rowToRecord);
 }
@@ -40,10 +55,14 @@ export async function getMaxSequenceNumForDA(daId: string): Promise<number> {
   return row?.max_seq ?? 0;
 }
 
-export async function getNextSequenceNumForDA(daId: string): Promise<number> {
+export async function getNextSequenceNumForDA(daId: string, daName?: string): Promise<number> {
   const maxSeq = await getMaxSequenceNumForDA(daId);
   if (maxSeq > 0) return maxSeq + 1;
-  // No records yet — check if a starting number was set
+  // No records yet — check if a starting number was set (by name or id)
+  if (daName) {
+    const startNum = await getSetting(`start_seq_${daName}`);
+    if (startNum) return parseInt(startNum, 10);
+  }
   const startNum = await getSetting(`start_seq_${daId}`);
   return startNum ? parseInt(startNum, 10) : 1;
 }
@@ -58,7 +77,7 @@ export async function createRecord(
   const db = await getDatabase();
   const id = preGeneratedId ?? generateUUID();
   const now = new Date().toISOString();
-  const seqNum = await getNextSequenceNumForDA(payload.daId);
+  const seqNum = await getNextSequenceNumForDA(payload.daId, payload.daName);
 
   await db.runAsync(
     `INSERT INTO records
@@ -142,14 +161,26 @@ export async function deleteRecord(id: string): Promise<void> {
   const db = await getDatabase();
   const record = await getRecordById(id);
   if (!record) return;
-  await db.runAsync('DELETE FROM records WHERE id = ?', id);
+  if (record.syncStatus === 'pending') {
+    // Never synced — safe to hard delete
+    await db.runAsync('DELETE FROM records WHERE id = ?', id);
+  } else {
+    // Mark for deletion so sync can push the delete to Supabase
+    await db.runAsync("UPDATE records SET sync_status = 'deleted' WHERE id = ?", id);
+  }
   await touchDA(record.daId);
 }
 
 export async function deleteRecordsByDA(daId: string): Promise<FiberRecord[]> {
   const db = await getDatabase();
   const records = await getRecordsByDA(daId);
-  await db.runAsync('DELETE FROM records WHERE da_id = ?', daId);
+  for (const record of records) {
+    if (record.syncStatus === 'pending') {
+      await db.runAsync('DELETE FROM records WHERE id = ?', record.id);
+    } else {
+      await db.runAsync("UPDATE records SET sync_status = 'deleted' WHERE id = ?", record.id);
+    }
+  }
   return records; // return so callers can clean up photo files
 }
 

@@ -35,7 +35,6 @@ function AppContent() {
     >
       <Stack.Screen name="index" options={{ title: 'FiberPhoto', headerShown: false }} />
       <Stack.Screen name="auth" options={{ headerShown: false }} />
-      <Stack.Screen name="da-list" options={{ title: 'Load Existing DA' }} />
       <Stack.Screen name="da/[id]" options={{ title: 'DA Detail' }} />
       <Stack.Screen
         name="da/[id]/camera"

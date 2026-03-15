@@ -5,7 +5,7 @@ import { generateUUID } from '../utils/idGenerator';
 export async function getAllDAs(): Promise<DA[]> {
   const db = await getDatabase();
   const rows = await db.getAllAsync<RawDA>(
-    'SELECT * FROM das ORDER BY name ASC'
+    "SELECT * FROM das WHERE sync_status != 'deleted' ORDER BY name ASC"
   );
   return rows.map(rowToDA);
 }
@@ -22,7 +22,7 @@ export async function getDAById(id: string): Promise<DA | null> {
 export async function getDAByName(name: string): Promise<DA | null> {
   const db = await getDatabase();
   const row = await db.getFirstAsync<RawDA>(
-    'SELECT * FROM das WHERE name = ?',
+    "SELECT * FROM das WHERE name = ? AND sync_status != 'deleted'",
     name
   );
   return row ? rowToDA(row) : null;
@@ -41,7 +41,13 @@ export async function createDA(name: string): Promise<DA> {
 
 export async function deleteDA(id: string): Promise<void> {
   const db = await getDatabase();
-  await db.runAsync('DELETE FROM das WHERE id = ?', id);
+  const da = await getDAById(id);
+  if (!da) return;
+  if (da.syncStatus === 'pending') {
+    await db.runAsync('DELETE FROM das WHERE id = ?', id);
+  } else {
+    await db.runAsync("UPDATE das SET sync_status = 'deleted' WHERE id = ?", id);
+  }
 }
 
 export async function touchDA(id: string): Promise<void> {
@@ -52,13 +58,10 @@ export async function touchDA(id: string): Promise<void> {
   );
 }
 
-export async function daExistsByName(name: string): Promise<boolean> {
-  const db = await getDatabase();
-  const row = await db.getFirstAsync<{ count: number }>(
-    'SELECT COUNT(*) as count FROM das WHERE name = ?',
-    name
-  );
-  return (row?.count ?? 0) > 0;
+export async function getOrCreateDA(name: string): Promise<DA> {
+  const existing = await getDAByName(name);
+  if (existing) return existing;
+  return createDA(name);
 }
 
 interface RawDA {

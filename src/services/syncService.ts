@@ -1,14 +1,18 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from './supabase';
 import { getDatabase } from '../db/database';
-import { buildDisplayId, buildPhotoFilename } from '../utils/idGenerator';
-import { FiberRecord, DA, SyncStatus } from '../types';
 
 // ─── Sync State ────────────────────────────────────────────────────────────
 
 export type SyncState = 'idle' | 'syncing' | 'error' | 'offline';
 
-type SyncListener = (state: SyncState) => void;
+export interface SyncProgress {
+  phase: 'push-das' | 'push-records' | 'pull-das' | 'pull-records' | 'done';
+  current: number;
+  total: number;
+}
+
+type SyncListener = (state: SyncState, progress?: SyncProgress) => void;
 const listeners: SyncListener[] = [];
 let currentState: SyncState = 'idle';
 
@@ -24,47 +28,103 @@ export function getSyncState(): SyncState {
   return currentState;
 }
 
-function setSyncState(state: SyncState) {
+function setSyncState(state: SyncState, progress?: SyncProgress) {
   currentState = state;
-  listeners.forEach(fn => fn(state));
+  listeners.forEach(fn => fn(state, progress));
 }
 
 // ─── Full Sync ─────────────────────────────────────────────────────────────
 
 let syncInProgress = false;
 
-export async function performSync(userId: string): Promise<void> {
-  if (syncInProgress) return;
+export async function performSync(userId: string): Promise<string | null> {
+  if (syncInProgress) return null;
   syncInProgress = true;
-  setSyncState('syncing');
+  setSyncState('syncing', { phase: 'push-das', current: 0, total: 0 });
+
+  const errors: string[] = [];
 
   try {
-    await pushDAs(userId);
-    await pushRecords(userId);
-    await pullDAs();
-    await pullRecords();
-    setSyncState('idle');
-  } catch (err) {
-    console.warn('Sync failed:', err);
+    await pushDeletedRecords(errors);
+    await pushDeletedDAs(errors);
+    await pushDAs(userId, errors);
+    await pushRecords(userId, errors);
+    const pulledDAs = await pullDAs();
+    const pulledRecords = await pullRecords();
+    setSyncState('idle', { phase: 'done', current: 0, total: 0 });
+
+    const parts: string[] = [];
+    if (errors.length > 0) parts.push(`Errors:\n${errors.join('\n')}`);
+    parts.push(`Pulled ${pulledDAs} DAs, ${pulledRecords} records`);
+    return parts.join('\n\n');
+  } catch (err: any) {
+    const message = err?.message ?? String(err);
+    console.warn('Sync failed:', message);
     setSyncState('error');
+    return message;
   } finally {
     syncInProgress = false;
   }
 }
 
+// ─── Push Deletes ─────────────────────────────────────────────────────────
+
+async function pushDeletedRecords(errors: string[]): Promise<void> {
+  const db = await getDatabase();
+  const deleted = await db.getAllAsync<RawRecord>(
+    "SELECT * FROM records WHERE sync_status = 'deleted'"
+  );
+
+  for (const record of deleted) {
+    // Delete from Supabase
+    const { error } = await supabase.from('records').delete().eq('id', record.id);
+    if (error) {
+      errors.push(`Delete record ${record.sequence_num}: ${error.message}`);
+      continue;
+    }
+
+    // Delete photo from storage if it exists
+    if (record.photo_url) {
+      await supabase.storage.from('photos').remove([record.photo_url]);
+    }
+
+    // Hard delete locally now that Supabase is updated
+    await db.runAsync('DELETE FROM records WHERE id = ?', record.id);
+  }
+}
+
+async function pushDeletedDAs(errors: string[]): Promise<void> {
+  const db = await getDatabase();
+  const deleted = await db.getAllAsync<RawDA>(
+    "SELECT * FROM das WHERE sync_status = 'deleted'"
+  );
+
+  for (const da of deleted) {
+    const { error } = await supabase.from('das').delete().eq('id', da.id);
+    if (error) {
+      errors.push(`Delete DA ${da.name}: ${error.message}`);
+      continue;
+    }
+
+    // Hard delete locally
+    await db.runAsync('DELETE FROM das WHERE id = ?', da.id);
+  }
+}
+
 // ─── Push DAs ──────────────────────────────────────────────────────────────
 
-async function pushDAs(userId: string): Promise<void> {
+async function pushDAs(userId: string, errors: string[]): Promise<void> {
   const db = await getDatabase();
 
-  // Get DAs that need syncing
   const pending = await db.getAllAsync<RawDA>(
     "SELECT * FROM das WHERE sync_status IN ('pending', 'modified')"
   );
 
-  for (const da of pending) {
+  for (let i = 0; i < pending.length; i++) {
+    const da = pending[i];
+    setSyncState('syncing', { phase: 'push-das', current: i + 1, total: pending.length });
+
     if (da.sync_status === 'pending') {
-      // Insert to Supabase
       const { error } = await supabase.from('das').upsert({
         id: da.id,
         name: da.name,
@@ -74,7 +134,7 @@ async function pushDAs(userId: string): Promise<void> {
       });
 
       if (error) {
-        console.warn('Push DA failed:', da.id, error.message);
+        errors.push(`Push DA ${da.name}: ${error.message}`);
         continue;
       }
     } else if (da.sync_status === 'modified') {
@@ -84,12 +144,11 @@ async function pushDAs(userId: string): Promise<void> {
       }).eq('id', da.id);
 
       if (error) {
-        console.warn('Update DA failed:', da.id, error.message);
+        errors.push(`Update DA ${da.name}: ${error.message}`);
         continue;
       }
     }
 
-    // Mark as synced locally
     await db.runAsync(
       "UPDATE das SET sync_status = 'synced' WHERE id = ?",
       da.id
@@ -99,18 +158,42 @@ async function pushDAs(userId: string): Promise<void> {
 
 // ─── Push Records + Photos ─────────────────────────────────────────────────
 
-async function pushRecords(userId: string): Promise<void> {
+async function pushRecords(userId: string, errors: string[]): Promise<void> {
   const db = await getDatabase();
 
   const pending = await db.getAllAsync<RawRecord>(
     "SELECT * FROM records WHERE sync_status IN ('pending', 'modified')"
   );
 
-  for (const record of pending) {
-    // Upload photo first if no photo_url yet
-    let photoUrl = record.photo_url;
-    if (!photoUrl && record.photo_path) {
-      photoUrl = await uploadPhoto(record.id, record.photo_path, userId);
+  for (let i = 0; i < pending.length; i++) {
+    const record = pending[i];
+    setSyncState('syncing', { phase: 'push-records', current: i + 1, total: pending.length });
+
+    // Always ensure parent DA exists in Supabase before pushing record
+    const parentDA = await db.getFirstAsync<RawDA>(
+      'SELECT * FROM das WHERE id = ?', record.da_id
+    );
+    if (!parentDA) {
+      errors.push(`Push record ${record.sequence_num}: parent DA not found locally`);
+      continue;
+    }
+    const { error: daError } = await supabase.from('das').upsert({
+      id: parentDA.id,
+      name: parentDA.name,
+      created_by: userId,
+      created_at: parentDA.created_at,
+      updated_at: parentDA.updated_at,
+    });
+    if (daError) {
+      errors.push(`Push record ${record.sequence_num}: failed to push parent DA ${parentDA.name}: ${daError.message}`);
+      continue;
+    }
+    await db.runAsync("UPDATE das SET sync_status = 'synced' WHERE id = ?", parentDA.id);
+
+    // Upload photo first if we haven't stored a storage path yet
+    let storagePath = record.photo_url;
+    if (!storagePath && record.photo_path) {
+      storagePath = await uploadPhoto(record.id, record.photo_path, userId);
     }
 
     if (record.sync_status === 'pending') {
@@ -120,7 +203,7 @@ async function pushRecords(userId: string): Promise<void> {
         sequence_num: record.sequence_num,
         type_abbrev: record.type_abbrev,
         structure_type: record.structure_type,
-        photo_url: photoUrl,
+        photo_url: storagePath,
         has_sc: record.has_sc === 1,
         has_terminal: record.has_terminal === 1,
         terminal_designation: record.terminal_designation,
@@ -131,7 +214,7 @@ async function pushRecords(userId: string): Promise<void> {
       });
 
       if (error) {
-        console.warn('Push record failed:', record.id, error.message);
+        errors.push(`Push record ${record.sequence_num}: ${error.message}`);
         continue;
       }
     } else if (record.sync_status === 'modified') {
@@ -142,149 +225,202 @@ async function pushRecords(userId: string): Promise<void> {
         has_terminal: record.has_terminal === 1,
         terminal_designation: record.terminal_designation,
         notes: record.notes,
-        photo_url: photoUrl,
+        photo_url: storagePath,
         updated_at: record.updated_at,
       }).eq('id', record.id);
 
       if (error) {
-        console.warn('Update record failed:', record.id, error.message);
+        errors.push(`Update record ${record.sequence_num}: ${error.message}`);
         continue;
       }
     }
 
-    // Mark as synced locally
     await db.runAsync(
       "UPDATE records SET sync_status = 'synced', photo_url = ? WHERE id = ?",
-      photoUrl ?? null, record.id
+      storagePath ?? null, record.id
     );
   }
 }
 
+// ─── Paginated Fetch Helper ───────────────────────────────────────────────
+
+const PAGE_SIZE = 500;
+
+async function fetchAllPaginated<T>(
+  table: string,
+  afterDate: string | null
+): Promise<T[]> {
+  const all: T[] = [];
+  let from = 0;
+
+  while (true) {
+    let query = supabase
+      .from(table)
+      .select('*')
+      .order('updated_at', { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (afterDate) {
+      query = query.gt('updated_at', afterDate);
+    }
+
+    const { data, error } = await query;
+    if (error) throw new Error(`Pull ${table} failed: ${error.message}`);
+    if (!data || data.length === 0) break;
+
+    all.push(...(data as T[]));
+    if (data.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+
+  return all;
+}
+
 // ─── Pull DAs ──────────────────────────────────────────────────────────────
 
-async function pullDAs(): Promise<void> {
+async function pullDAs(): Promise<number> {
   const db = await getDatabase();
 
-  // Get the latest updated_at we have locally for synced records
-  const lastSync = await db.getFirstAsync<{ max_updated: string | null }>(
-    "SELECT MAX(updated_at) as max_updated FROM das WHERE sync_status = 'synced'"
-  );
+  // Always pull all DAs (small dataset, avoids incremental sync bugs)
+  const remoteDAs = await fetchAllPaginated<any>('das', null);
+  console.log('[Sync] Pull DAs - found:', remoteDAs.length);
+  if (remoteDAs.length === 0) return 0;
 
-  let query = supabase.from('das').select('*');
-  if (lastSync?.max_updated) {
-    query = query.gt('updated_at', lastSync.max_updated);
-  }
+  setSyncState('syncing', { phase: 'pull-das', current: 0, total: remoteDAs.length });
 
-  const { data, error } = await query;
-  if (error) {
-    console.warn('Pull DAs failed:', error.message);
-    return;
-  }
-  if (!data || data.length === 0) return;
+  for (let i = 0; i < remoteDAs.length; i++) {
+    const remote = remoteDAs[i];
+    setSyncState('syncing', { phase: 'pull-das', current: i + 1, total: remoteDAs.length });
 
-  for (const remote of data) {
-    // Check if we have this DA locally
-    const local = await db.getFirstAsync<RawDA>(
+    const localById = await db.getFirstAsync<RawDA>(
       'SELECT * FROM das WHERE id = ?', remote.id
     );
 
-    if (!local) {
-      // New DA from another user — insert locally
+    if (localById?.sync_status === 'deleted') {
+      // User deleted this locally — don't re-insert
+      continue;
+    }
+
+    if (!localById) {
+      // Check if a local DA with the same name exists (created before sync)
+      const localByName = await db.getFirstAsync<RawDA>(
+        'SELECT * FROM das WHERE name = ? AND id != ?', remote.name, remote.id
+      );
+
+      if (localByName) {
+        if (localByName.sync_status === 'deleted') continue;
+        // Merge: reassign records from local DA to remote DA, then delete local
+        await db.runAsync(
+          'UPDATE records SET da_id = ? WHERE da_id = ?',
+          remote.id, localByName.id
+        );
+        await db.runAsync('DELETE FROM das WHERE id = ?', localByName.id);
+      }
+
       await db.runAsync(
         "INSERT INTO das (id, name, created_by, created_at, updated_at, sync_status) VALUES (?, ?, ?, ?, ?, 'synced')",
         remote.id, remote.name, remote.created_by, remote.created_at, remote.updated_at
       );
-    } else if (local.sync_status === 'synced' && remote.updated_at > local.updated_at) {
-      // Remote is newer and we haven't modified locally — update
+    } else if (localById.sync_status === 'synced' && remote.updated_at > localById.updated_at) {
       await db.runAsync(
         "UPDATE das SET name = ?, updated_at = ?, sync_status = 'synced' WHERE id = ?",
         remote.name, remote.updated_at, remote.id
       );
     }
-    // If local is 'modified', keep local version (will push on next sync)
   }
+  return remoteDAs.length;
 }
 
 // ─── Pull Records + Photos ─────────────────────────────────────────────────
 
-async function pullRecords(): Promise<void> {
+const DOWNLOAD_CONCURRENCY = 3;
+
+async function pullRecords(): Promise<number> {
   const db = await getDatabase();
 
-  const lastSync = await db.getFirstAsync<{ max_updated: string | null }>(
-    "SELECT MAX(updated_at) as max_updated FROM records WHERE sync_status = 'synced'"
-  );
+  // Always pull all records (avoids incremental sync cursor bugs)
+  const remoteRecords = await fetchAllPaginated<any>('records', null);
+  console.log('[Sync] Pull records - found:', remoteRecords.length);
+  if (remoteRecords.length === 0) return 0;
 
-  let query = supabase.from('records').select('*');
-  if (lastSync?.max_updated) {
-    query = query.gt('updated_at', lastSync.max_updated);
-  }
+  setSyncState('syncing', { phase: 'pull-records', current: 0, total: remoteRecords.length });
 
-  const { data, error } = await query;
-  if (error) {
-    console.warn('Pull records failed:', error.message);
-    return;
-  }
-  if (!data || data.length === 0) return;
+  // Process records sequentially to avoid SQLite concurrency issues
+  for (let i = 0; i < remoteRecords.length; i++) {
+    const remote = remoteRecords[i];
+    setSyncState('syncing', { phase: 'pull-records', current: i + 1, total: remoteRecords.length });
 
-  for (const remote of data) {
-    const local = await db.getFirstAsync<RawRecord>(
-      'SELECT * FROM records WHERE id = ?', remote.id
-    );
-
-    // Download photo if we don't have it locally
-    let localPhotoPath = local?.photo_path ?? '';
-    if (remote.photo_url && !local) {
-      localPhotoPath = await downloadPhoto(remote.id, remote.photo_url);
-    }
-
-    if (!local) {
-      // New record from another user
-      await db.runAsync(
-        `INSERT INTO records
-          (id, sequence_num, da_id, type_abbrev, structure_type, photo_path, photo_url,
-           has_sc, has_terminal, terminal_designation, notes, recorded_by,
-           created_at, updated_at, sync_status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')`,
-        remote.id,
-        remote.sequence_num,
-        remote.da_id,
-        remote.type_abbrev,
-        remote.structure_type,
-        localPhotoPath,
-        remote.photo_url,
-        remote.has_sc ? 1 : 0,
-        remote.has_terminal ? 1 : 0,
-        remote.terminal_designation,
-        remote.notes,
-        remote.recorded_by,
-        remote.created_at,
-        remote.updated_at
+    try {
+      const local = await db.getFirstAsync<RawRecord>(
+        'SELECT * FROM records WHERE id = ?', remote.id
       );
-    } else if (local.sync_status === 'synced' && remote.updated_at > local.updated_at) {
-      // Remote is newer — update locally
-      await db.runAsync(
-        `UPDATE records SET
-           type_abbrev = ?, structure_type = ?, has_sc = ?, has_terminal = ?,
-           terminal_designation = ?, notes = ?, photo_url = ?,
-           updated_at = ?, sync_status = 'synced'
-         WHERE id = ?`,
-        remote.type_abbrev,
-        remote.structure_type,
-        remote.has_sc ? 1 : 0,
-        remote.has_terminal ? 1 : 0,
-        remote.terminal_designation,
-        remote.notes,
-        remote.photo_url,
-        remote.updated_at,
-        remote.id
-      );
+
+      // Skip if user deleted this locally
+      if (local?.sync_status === 'deleted') continue;
+
+      // Download photo if we don't have it locally
+      let localPhotoPath = local?.photo_path ?? '';
+      if (remote.photo_url && !local) {
+        localPhotoPath = await downloadPhoto(remote.id, remote.photo_url);
+      }
+
+      if (!local) {
+        // Verify the DA exists locally before inserting
+        const daExists = await db.getFirstAsync<{ id: string }>(
+          'SELECT id FROM das WHERE id = ?', remote.da_id
+        );
+        if (!daExists) {
+          console.warn(`[Sync] Skipping record ${remote.id} — DA ${remote.da_id} not found locally`);
+          continue;
+        }
+
+        await db.runAsync(
+          `INSERT INTO records
+            (id, sequence_num, da_id, type_abbrev, structure_type, photo_path, photo_url,
+             has_sc, has_terminal, terminal_designation, notes, recorded_by,
+             created_at, updated_at, sync_status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')`,
+          remote.id,
+          remote.sequence_num,
+          remote.da_id,
+          remote.type_abbrev,
+          remote.structure_type,
+          localPhotoPath,
+          remote.photo_url,
+          remote.has_sc ? 1 : 0,
+          remote.has_terminal ? 1 : 0,
+          remote.terminal_designation,
+          remote.notes,
+          remote.recorded_by,
+          remote.created_at,
+          remote.updated_at
+        );
+      } else if (local.sync_status === 'synced' && remote.updated_at > local.updated_at) {
+        await db.runAsync(
+          `UPDATE records SET
+             type_abbrev = ?, structure_type = ?, has_sc = ?, has_terminal = ?,
+             terminal_designation = ?, notes = ?, photo_url = ?,
+             updated_at = ?, sync_status = 'synced'
+           WHERE id = ?`,
+          remote.type_abbrev,
+          remote.structure_type,
+          remote.has_sc ? 1 : 0,
+          remote.has_terminal ? 1 : 0,
+          remote.terminal_designation,
+          remote.notes,
+          remote.photo_url,
+          remote.updated_at,
+          remote.id
+        );
+      }
+    } catch (err: any) {
+      console.warn(`[Sync] Pull record ${remote.id} failed:`, err?.message);
     }
   }
+  return remoteRecords.length;
 }
 
-// ─── Photo Upload/Download ─────────────────────────────────────────────────
-
-const PHOTOS_DIR = `${FileSystem.documentDirectory}fiberphoto-photos/`;
+// ─── Photo Upload ─────────────────────────────────────────────────────────
 
 async function uploadPhoto(
   recordId: string,
@@ -299,7 +435,6 @@ async function uploadPhoto(
       encoding: FileSystem.EncodingType.Base64,
     });
 
-    // Convert base64 to Uint8Array for upload
     const binaryString = atob(base64);
     const bytes = new Uint8Array(binaryString.length);
     for (let i = 0; i < binaryString.length; i++) {
@@ -320,24 +455,23 @@ async function uploadPhoto(
       return null;
     }
 
-    // Get the public/signed URL
-    const { data: urlData } = supabase.storage
-      .from('photos')
-      .getPublicUrl(storagePath);
-
-    return urlData?.publicUrl ?? storagePath;
+    // Store the storage path, not a URL — we generate signed URLs on download
+    return storagePath;
   } catch (err) {
     console.warn('Photo upload error:', err);
     return null;
   }
 }
 
+// ─── Photo Download ───────────────────────────────────────────────────────
+
+const PHOTOS_DIR = `${FileSystem.documentDirectory}fiberphoto-photos/`;
+
 async function downloadPhoto(
   recordId: string,
-  photoUrl: string
+  storagePath: string
 ): Promise<string> {
   try {
-    // Ensure photos directory exists
     const dirInfo = await FileSystem.getInfoAsync(PHOTOS_DIR);
     if (!dirInfo.exists) {
       await FileSystem.makeDirectoryAsync(PHOTOS_DIR, { intermediates: true });
@@ -345,40 +479,22 @@ async function downloadPhoto(
 
     const localPath = `${PHOTOS_DIR}${recordId}.jpg`;
 
-    // Check if already downloaded
+    // Already downloaded
     const fileInfo = await FileSystem.getInfoAsync(localPath);
     if (fileInfo.exists) return localPath;
 
-    // Download from Supabase storage
-    // photoUrl might be a full URL or a storage path
-    if (photoUrl.startsWith('http')) {
-      await FileSystem.downloadAsync(photoUrl, localPath);
-    } else {
-      // It's a storage path — download via Supabase
-      const { data, error } = await supabase.storage
-        .from('photos')
-        .download(photoUrl);
+    // Generate a signed URL (valid 1 hour) and download via FileSystem
+    // This avoids the FileReader/blob issue in React Native
+    const { data: signedData, error: signError } = await supabase.storage
+      .from('photos')
+      .createSignedUrl(storagePath, 3600);
 
-      if (error || !data) {
-        console.warn('Photo download failed:', error?.message);
-        return '';
-      }
-
-      // Convert blob to base64 and save
-      const reader = new FileReader();
-      const base64 = await new Promise<string>((resolve) => {
-        reader.onloadend = () => {
-          const result = reader.result as string;
-          resolve(result.split(',')[1] ?? '');
-        };
-        reader.readAsDataURL(data);
-      });
-
-      await FileSystem.writeAsStringAsync(localPath, base64, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
+    if (signError || !signedData?.signedUrl) {
+      console.warn('Signed URL failed:', signError?.message);
+      return '';
     }
 
+    await FileSystem.downloadAsync(signedData.signedUrl, localPath);
     return localPath;
   } catch (err) {
     console.warn('Photo download error:', err);

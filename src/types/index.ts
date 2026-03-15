@@ -63,6 +63,7 @@ export interface FiberRecord {
 // ─── New record payload (before DB insert) ────
 export interface NewRecordPayload {
   daId: string;
+  daName?: string;
   structureType: string;
   typeAbbrev: StructureTypeId;
   photoPath: string;

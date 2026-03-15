@@ -11,7 +11,7 @@ import {
 } from 'react-native-vision-camera';
 import { Accelerometer } from 'expo-sensors';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { getDAById } from '@/db/daRepository';
+import { getDAByName, getOrCreateDA } from '@/db/daRepository';
 import { colors, spacing } from '@/components/theme';
 
 /** Determine icon rotation from accelerometer data */
@@ -32,7 +32,8 @@ export default function CameraScreen() {
   const [daName, setDaName] = useState('');
 
   useEffect(() => {
-    getDAById(id).then(da => { if (da) setDaName(da.name); });
+    if (!id) return;
+    getDAByName(id).then(da => { if (da) setDaName(da.name); else setDaName(id); });
   }, [id]);
   const rotateAnim = useRef(new Animated.Value(0)).current;
   const lastRotation = useRef(0);

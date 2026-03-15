@@ -6,7 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack } from 'expo-router';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
-import { getDAById, deleteDA } from '@/db/daRepository';
+import { getDAByName, getOrCreateDA, deleteDA } from '@/db/daRepository';
 import { getRecordsByDA, deleteRecordsByDA } from '@/db/recordRepository';
 import { exportDA } from '@/services/exportService';
 import { deletePhoto } from '@/services/photoService';
@@ -16,7 +16,7 @@ import { DA, FiberRecord } from '@/types';
 import { colors, spacing, radius } from '@/components/theme';
 
 export default function DADetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id: daName } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { triggerSync } = useSyncContext();
 
@@ -29,15 +29,13 @@ export default function DADetailScreen() {
   useFocusEffect(
     useCallback(() => {
       load();
-    }, [id])
+    }, [daName])
   );
 
   async function load() {
     setLoading(true);
-    const [daData, recs] = await Promise.all([
-      getDAById(id),
-      getRecordsByDA(id),
-    ]);
+    const daData = await getDAByName(daName);
+    const recs = daData ? await getRecordsByDA(daData.id) : [];
     setDA(daData);
     setRecords(recs);
     setLoading(false);
@@ -50,25 +48,28 @@ export default function DADetailScreen() {
     setRefreshing(false);
   };
 
-  const handleNewRecord = useCallback(() => {
-    router.push(`/da/${id}/camera`);
-  }, [id]);
+  const handleNewRecord = useCallback(async () => {
+    // Create DA on-demand only when user wants to add a record
+    const daData = await getOrCreateDA(daName);
+    router.push(`/da/${daName}/camera`);
+  }, [daName]);
 
   const renderItem = useCallback(({ item }: { item: FiberRecord }) => (
     <RecordCard
       record={item}
-      onPress={() => router.push(`/da/${id}/record/${item.id}`)}
+      onPress={() => router.push(`/da/${daName}/record/${item.id}`)}
     />
-  ), [id]);
+  ), []);
 
   const handleExport = async () => {
     doExport();
   };
 
   const doExport = async () => {
+    if (!da) return;
     setExporting(true);
     try {
-      await exportDA(id);
+      await exportDA(da.id);
     } catch (e: any) {
       Alert.alert('Export Failed', e.message ?? 'Unknown error');
     } finally {
@@ -110,12 +111,13 @@ export default function DADetailScreen() {
   };
 
   const doDeleteDA = async () => {
+    if (!da) return;
     try {
       for (const record of records) {
         await deletePhoto(record.photoPath);
       }
-      await deleteRecordsByDA(id);
-      await deleteDA(id);
+      await deleteRecordsByDA(da.id);
+      await deleteDA(da.id);
       router.back();
     } catch (e: any) {
       Alert.alert('Delete Failed', e.message ?? 'Unknown error');
@@ -130,17 +132,12 @@ export default function DADetailScreen() {
     );
   }
 
-  if (!da) {
-    return (
-      <View style={styles.center}>
-        <Text style={styles.errorText}>DA not found.</Text>
-      </View>
-    );
-  }
+  // DA may not exist yet (no records created) — show empty state with the name
+  const displayName = da?.name ?? daName;
 
   return (
     <SafeAreaView style={styles.safe}>
-      <Stack.Screen options={{ title: da.name }} />
+      <Stack.Screen options={{ title: displayName }} />
       <FlatList
         data={records}
         keyExtractor={item => item.id}
@@ -149,7 +146,7 @@ export default function DADetailScreen() {
           <>
             {/* DA header */}
             <View style={styles.daHeader}>
-              <Text style={styles.daId}>{da.name}</Text>
+              <Text style={styles.daId}>{displayName}</Text>
               <View style={styles.statsRow}>
                 <View style={styles.statBubble}>
                   <Text style={styles.statNum}>{records.length}</Text>
@@ -210,11 +207,11 @@ export default function DADetailScreen() {
             <Text style={styles.emptyHint}>Tap "+ New Record" to photograph your first structure</Text>
           </View>
         }
-        ListFooterComponent={
+        ListFooterComponent={da ? (
           <TouchableOpacity style={styles.deleteDABtn} onPress={handleDeleteDA}>
             <Text style={styles.deleteDAText}>Delete {da.name}</Text>
           </TouchableOpacity>
-        }
+        ) : null}
         contentContainerStyle={{ paddingBottom: spacing.xl }}
         refreshControl={
           <RefreshControl
